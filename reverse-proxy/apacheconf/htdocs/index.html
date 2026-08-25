@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>reverse-proxy-cluster</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 42rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5; }
+    code { background: #f1f1f1; padding: .1rem .3rem; border-radius: .25rem; }
+    li { margin: .25rem 0; }
+  </style>
+</head>
+<body>
+  <h1>reverse-proxy-cluster</h1>
+  <p>Apache httpd reverse proxy running. Backends are enabled with Compose
+     profiles — a route below only answers once its profile is up:</p>
+  <ul>
+    <li><code>GET /java/messages</code> — Spring Boot 3.5 / Java 21 (<code>--profile java</code>)</li>
+    <li><code>GET /nginx/</code> and <code>GET /nginx/messages</code> — static nginx (<code>--profile nginx</code>)</li>
+    <li><code>GET /node/messages</code> — Node.js (<code>--profile node</code>)</li>
+    <li><code>GET /python/messages</code> — Python (<code>--profile python</code>)</li>
+  </ul>
+  <p>Also served: this page over HTTPS at <code>https://localhost:8443/</code>
+     (self-signed dev cert) and <code>GET /server-status</code> (private ranges only).</p>
+</body>
+</html>

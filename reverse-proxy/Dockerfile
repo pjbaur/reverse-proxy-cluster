@@ -1,26 +1,17 @@
-# The Base Image used to create this Image
-FROM httpd:latest
+# Patch-pinned: the proxy is the demo's subject — reproducibility matters most here.
+FROM httpd:2.4.68-alpine
 
-# Install ping, curl
-RUN apt update \
- && apt install -y iputils-ping curl \
- && rm -rf /var/lib/apt/lists/*
-
-# to Copy a file named httpd.conf from present working directory to the /usr/local/apache2/conf inside the container
-# I have taken the Standard httpd.conf file and enabled the necassary modules and adding Support for an additional Directory
+# Trimmed base config (2.4-only syntax, 14 modules), lands in the stock path.
 COPY httpd.conf /usr/local/apache2/conf/httpd.conf
 
-# This is the Additional Directory where we are going to keep our Virtualhost configuraiton files
-# You can use the image to create N number of different virtual hosts
-RUN mkdir -p /usr/local/apache2/conf/sites/
-COPY apacheconf/sites/testlocal.conf /usr/local/apache2/conf/sites/testlocal.conf
+# Per-topic config: status policy, forward headers, one file per backend route,
+# TLS vhost. COPY creates conf/sites/ automatically.
+COPY apacheconf/sites/ /usr/local/apache2/conf/sites/
 
-# Static content for the test.local Virtualhost DocumentRoot
-COPY apacheconf/htmlfiles/ /usr/local/apache2/testlocal/
+# Landing page served from DocumentRoot.
+COPY apacheconf/htdocs/ /usr/local/apache2/htdocs/
 
-# To tell docker to expose this port
 EXPOSE 80
 
-# The Base command, This command should be used to start the container
-# Remember, A Container is a Process.As long as the base process (started by base cmd) is live the Container will be ALIVE.
-CMD ["httpd", "-D", "FOREGROUND"]
+# httpd-foreground is the stock entrypoint of the httpd image (httpd -D FOREGROUND).
+CMD ["httpd-foreground"]
