@@ -17,6 +17,19 @@ services:
       retries: 3
       start_period: 5s
 
+  java-backend:
+    build: ./backends/java
+    profiles: ["java"]
+    restart: unless-stopped
+    networks:
+      - proxy-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/messages"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+
 networks:
   proxy-net:
     driver: bridge
