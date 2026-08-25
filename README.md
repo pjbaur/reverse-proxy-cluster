@@ -1,85 +1,177 @@
 # reverse-proxy-cluster
 
-A small Docker Compose demo that runs an Apache HTTP Server (`httpd`) as a reverse proxy in front of a Java backend service. The proxy listens on the outside port and forwards selected paths to the backend container over a private Docker bridge network.
+A Docker Compose demo of an Apache HTTP Server 2.4 reverse proxy fronting four
+interchangeable backends. The proxy is always running and is the only service
+with published ports — `8080` (plain HTTP) and `8443` (TLS with a self-signed
+dev certificate). Each backend sits behind a Compose profile, so you start
+exactly the backends you want and reach all of them through the same proxy by
+URL prefix (`/java/`, `/nginx/`, `/node/`, `/python/`).
 
 ## Architecture
 
 ```
-client ──> :8080 ──> reverse-proxy (httpd)  ──/messages──> app-server:8888 (Java)
+client ──▶ :8080 (http) ──┐
+                          ├──▶ reverse-proxy (httpd:2.4.68-alpine, always on)
+client ──▶ :8443 (https) ─┘   │  TLS terminated here, self-signed dev cert
+                              │
+                              │  proxy-net (internal Docker bridge network)
+                              ├─▶ /java/   ──▶ java-backend   :8080  (profile java)
+                              ├─▶ /nginx/  ──▶ nginx-backend  :80    (profile nginx)
+                              ├─▶ /node/   ──▶ node-backend   :8080  (profile node)
+                              └─▶ /python/ ──▶ python-backend :8080  (profile python)
 ```
 
-| Service        | Image                  | Host port | Container port | Purpose                                      |
-| -------------- | ---------------------- | --------- | -------------- | -------------------------------------------- |
-| reverse-proxy  | `httpd:latest` (custom)| 8080      | 80             | Apache reverse proxy, virtual host `test.local` |
-| app-server     | `openjdk:8-jdk-alpine` | 8889      | 8888           | Runs `docker-message-server-1.0.0.jar`       |
+| Service         | Image                                     | Profile  | Published ports | Route       |
+| --------------- | ----------------------------------------- | -------- | --------------- | ----------- |
+| reverse-proxy   | `httpd:2.4.68-alpine`                     | — (on)   | `8080:80`, `8443:443` | `/` and `/server-status` |
+| java-backend    | `eclipse-temurin:21-jre-alpine` (multi-stage build) | `java`   | none            | `/java/`    |
+| nginx-backend   | `nginx:1.30-alpine`                       | `nginx`  | none            | `/nginx/`   |
+| node-backend    | `node:22-alpine`                          | `node`   | none            | `/node/`    |
+| python-backend  | `python:3.12-alpine`                      | `python` | none            | `/python/`  |
 
-Both services are attached to the `spring-cloud-network` bridge network, so the proxy reaches the backend via the Docker service name (`http://app-server:8888`).
+All services attach to the `proxy-net` bridge network; the proxy reaches each
+backend by its Compose service name (`http://java-backend:8080` and so on).
+Backends publish no ports — the host can only reach them through the proxy.
 
-## Project layout
+## Quickstart
 
-```
-docker-compose.yml                        # Service definitions and network
-reverse-proxy/
-  Dockerfile                              # httpd image with proxy modules enabled
-  httpd.conf                              # Base Apache config; includes conf/sites/*.conf
-  apacheconf/sites/testlocal.conf         # Virtual host: static content + ProxyPass rules
-  apacheconf/htmlfiles/index.html         # Test page for the virtual host
-app-server/
-  Dockerfile                              # OpenJDK 8 image wrapping the message server jar
-  docker-message-server-1.0.0.jar         # Backend application
-start-command.txt                         # Legacy manual `docker run` notes (pre-Compose)
-```
-
-## Prerequisites
-
-- Docker
-- Docker Compose
-
-## Run
-
-From the repository root:
+Requires Docker (Compose v2) and OpenSSL >= 1.1.1.
 
 ```sh
-docker compose up --build
+# 1. Generate the self-signed dev certificate (gitignored; the build needs it)
+scripts/gen-dev-certs.sh
+
+# 2. Start the proxy plus one backend
+docker compose --profile java up -d --build
+
+# 3. Exercise it
+curl http://localhost:8080/                    # landing page, served by the proxy
+curl http://localhost:8080/java/messages       # proxied to the Spring Boot backend
+curl -k https://localhost:8443/java/messages   # same route over TLS
 ```
 
-Or with older Compose versions:
+To run every backend, list all four profiles:
 
 ```sh
-docker-compose up --build
+docker compose --profile java --profile nginx --profile node --profile python up -d --build
 ```
 
-## Test
-
-Proxy path (request hits Apache, which forwards to the backend):
+Teardown — pass the same `--profile` flags you used to start:
 
 ```sh
-curl http://localhost:8080/messages
+docker compose --profile java down
 ```
 
-Backend directly (bypasses the proxy, useful to compare responses):
+## Routes
+
+| Route               | Served by      | Needs profile | Response                                    |
+| ------------------- | -------------- | ------------- | ------------------------------------------- |
+| `GET /`             | reverse-proxy  | —             | static landing page                         |
+| `GET /java/messages`| java-backend   | `java`        | JSON; echoes `X-Forwarded-*` headers        |
+| `GET /nginx/`       | nginx-backend  | `nginx`       | static HTML page                            |
+| `GET /nginx/messages` | nginx-backend | `nginx`      | static JSON file                            |
+| `GET /node/messages`| node-backend   | `node`        | JSON; echoes `X-Forwarded-*` headers        |
+| `GET /python/messages` | python-backend | `python`   | JSON; echoes `X-Forwarded-*` headers        |
+| `GET /server-status` | reverse-proxy | —             | Apache `mod_status` page                    |
+| any other path      | reverse-proxy  | —             | 404                                         |
+
+`/server-status` accepts only loopback and RFC 1918 source addresses
+(`Require ip` in `reverse-proxy/apacheconf/sites/00-server-status.conf`).
+Traffic to the published ports arrives from the Docker bridge gateway, so
+`curl` from the host and from CI works.
+
+### X-Forwarded headers
+
+`mod_proxy_http` adds `X-Forwarded-For`, `X-Forwarded-Host` and
+`X-Forwarded-Server` automatically. `10-proxy.conf` derives the other two per
+request — `X-Forwarded-Proto` from `%{REQUEST_SCHEME}` and `X-Forwarded-Port`
+from `%{SERVER_PORT}`. Every backend except nginx echoes the three back in its
+JSON (`x_forwarded_proto`, `x_forwarded_port`, `x_forwarded_for`), which makes
+the proxy's header handling visible: the same endpoint reports
+`"x_forwarded_proto":"http"` on port 8080 and `"https"` on port 8443. nginx
+serves a static file and cannot echo request headers.
+
+## Tests
+
+`scripts/smoke.sh` is the test suite. It builds the stack, starts the
+requested profiles, waits until every container reports healthy, exercises
+each route, then tears the stack down again. All checks run even if an earlier
+one failed, and any failure exits non-zero:
 
 ```sh
-curl http://localhost:8889/messages
+scripts/smoke.sh               # all four profiles — 17 checks
+scripts/smoke.sh java node     # any subset
 ```
 
-The virtual host declares `ServerName test.local`. Since it is the only virtual host, Apache serves it for any host header, so `localhost` works without changes. To use the real name, add it to your hosts file:
+It generates the dev certificate itself if `reverse-proxy/certs/server.crt`
+is missing, so it is also the one-command verification of a fresh clone.
 
-```sh
-echo "127.0.0.1 test.local www.test.local" | sudo tee -a /etc/hosts
-curl http://test.local:8080/messages
-```
+CI (`.github/workflows/ci.yml`) runs a single job on every push to `master`
+and on pull requests: set up buildx, generate the certificate, build all five
+images with GitHub Actions layer caching (merged from
+`.github/compose.cache.yml`), then run `scripts/smoke.sh`.
 
-## Configuration
+The Java backend additionally has `@WebMvcTest` unit tests
+(`backends/java/src/test/`). Its image build runs `mvn package` without
+`-DskipTests`, so building `java-backend` is itself the test run.
 
-- **Virtual hosts** live in `reverse-proxy/apacheconf/sites/`. The Dockerfile copies them into `/usr/local/apache2/conf/sites/`, and the base `httpd.conf` picks them up with `IncludeOptional conf/sites/*.conf`. Drop a new `*.conf` file in that directory and rebuild to add another virtual host.
-- **Proxy rules** are `ProxyPass` / `ProxyPassReverse` directives in `testlocal.conf`, currently mapping `/messages` to `http://app-server:8888/messages`. The commented-out directives in that file show how to enable SSL termination (`SSLProxyEngine`) and set `X-Forwarded-Proto` / `X-Forwarded-Port` headers.
-- **Proxy modules** (`mod_proxy`, `mod_proxy_http`, `mod_proxy_balancer`, and the balancer LB methods, among others) are enabled in `httpd.conf`, so balancer/cluster configurations can be added without rebuilding the base config.
+## Configuration model
 
-### Static content
+- `reverse-proxy/httpd.conf` — trimmed base config, Apache 2.4-only syntax,
+  14 modules. Serves the landing page, logs to stdout/stderr, and pulls in
+  everything else via `IncludeOptional conf/sites/*.conf`.
+- `reverse-proxy/apacheconf/sites/` — per-topic config, included in numeric
+  (alphabetical) order:
+  - `00-server-status.conf` — `mod_status`, loopback + RFC 1918 only.
+  - `10-proxy.conf` — shared proxy behaviour: `ProxyRequests Off` (explicit;
+    this must never become a forward proxy) and the `X-Forwarded-Proto`/`Port`
+    request headers.
+  - `20-java.conf` … `23-python.conf` — one `ProxyPass`/`ProxyPassReverse`
+    pair per backend, each with `retry=0` so a failed connect is retried on
+    the next request instead of poisoning the worker for 60 s.
+  - `90-ssl.conf` — the only `<VirtualHost>` (`*:443`). Everything else is
+    server-level config that port 80 serves directly and the vhost inherits,
+    so both listeners behave identically. The `SSLSessionCache` directives
+    sit at the top of the file at server level, because Apache rejects them
+    inside a `VirtualHost`.
+- Config, landing page and certificate are `COPY`d into the image at build
+  time — nothing is bind-mounted and there is no live reload. After editing
+  anything under `reverse-proxy/`, run `docker compose build reverse-proxy`
+  and recreate the container.
+- TLS uses a self-signed dev certificate from `scripts/gen-dev-certs.sh`
+  (OpenSSL >= 1.1.1, `CN=localhost` with SAN `localhost`/`127.0.0.1`, 10-year
+  validity) written to the gitignored `reverse-proxy/certs/`. HTTP to HTTPS
+  redirect is deliberately not enabled — plain HTTP on 8080 is part of the
+  smoke tests and of the proxy healthcheck. A redirect recipe lives in a
+  comment at the bottom of `90-ssl.conf`.
+- Image pinning: the proxy is patch-pinned (`httpd:2.4.68-alpine`) because it
+  is the demo's subject; the backends are major-pinned
+  (`nginx:1.30-alpine`, `node:22-alpine`, `python:3.12-alpine`, Temurin 21).
+- Healthchecks are defined once in `docker-compose.yml` using the `wget`
+  built into every Alpine image (busybox). `nginx-backend` and
+  `python-backend` probe `http://127.0.0.1/...` because their listeners are
+  IPv4-only while busybox `wget` resolves `localhost` to `::1` first; the
+  other services use `localhost`. Every service sets
+  `restart: unless-stopped`.
 
-The virtual host's `DocumentRoot` (`/usr/local/apache2/testlocal`) is populated at build time from `apacheconf/htmlfiles/`, so `http://localhost:8080/` serves `index.html`. Changes to the static files require a rebuild.
+## Troubleshooting
 
-## Legacy notes
+- **Build fails with `COPY failed ... certs/server.crt: not found`** — the
+  dev certificate is missing. Run `scripts/gen-dev-certs.sh`, then rebuild.
+- **`address already in use` on port 8080 or 8443** — change the published
+  ports in `docker-compose.yml` and the matching `BASE_HTTP`/`BASE_HTTPS` in
+  `scripts/smoke.sh`, then restart.
+- **502 on a backend route** — that backend's profile is not running. Start
+  it with `docker compose --profile <name> up -d`. Because of `retry=0` the
+  route recovers on the next request; the other routes are unaffected.
+- **`curl` rejects the certificate on 8443** — it is self-signed. Use
+  `curl -k`, or import `reverse-proxy/certs/server.crt` into your trust
+  store.
+- **403 on `/server-status`** — the source address is outside loopback and
+  RFC 1918. That is the intended policy.
 
-`start-command.txt` contains the earlier, manual `docker run` command used before this setup was containerized with Compose. It references volume mounts and an image name (`httpd-proxyenabled`) that predate the current build; keep it as reference only.
+## Background
+
+`docs/REVIEW.md` is the frozen review that motivated the modernization of the
+proxy image (pinning, trimming, 2.4-only config). It is a historical record —
+do not update it to match later changes.
