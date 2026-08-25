@@ -1,23 +1,21 @@
-version: '2'
+name: reverse-proxy-cluster
+
 services:
-    reverse-proxy:
-        container_name: reverse-proxy
-        build:
-            context: reverse-proxy
-            dockerfile: Dockerfile
-        ports:
-            - 8080:80
-        networks:
-            - spring-cloud-network
-    app-server:
-        container_name: app-server
-        build:
-            context: app-server
-            dockerfile: Dockerfile
-        ports:
-            - 8889:8888
-        networks:
-            - spring-cloud-network
+  reverse-proxy:
+    build: ./reverse-proxy
+    container_name: reverse-proxy
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    networks:
+      - proxy-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
 networks:
-    spring-cloud-network:
-        driver: bridge
+  proxy-net:
+    driver: bridge

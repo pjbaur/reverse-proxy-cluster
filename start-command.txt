@@ -1,7 +1,0 @@
-docker container run \
---publish 90:80 \
--d – name apacheserver \
--v /Users/paulbaur/projects/reverse-proxy-cluster/apacheconf/sites:/usr/local/apache2/conf/sites \
--v /Users/paulbaur/projects/reverse-proxy-cluster/apps/docker/apacheconf/htmlfiles:/usr/local/apache2/techolaf \
-httpd-proxyenabled
-
