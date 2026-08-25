@@ -159,9 +159,9 @@ It generates the dev certificate itself if `reverse-proxy/certs/server.crt`
 is missing, so it is also the one-command verification of a fresh clone.
 
 CI (`.github/workflows/ci.yml`) runs a single job on every push to `master`
-and on pull requests: set up buildx, generate the certificate, build all five
-images — including the `balanced` replicas, which share the node image —
-with GitHub Actions layer caching (merged from
+and on pull requests: set up buildx, generate the certificate, build five
+distinct images — the `balanced` replicas are three services sharing the
+single node image — with GitHub Actions layer caching (merged from
 `.github/compose.cache.yml`), then run `scripts/smoke.sh`.
 
 The Java backend additionally has `@WebMvcTest` unit tests
@@ -208,10 +208,11 @@ The Java backend additionally has `@WebMvcTest` unit tests
   is the demo's subject; the backends are major-pinned
   (`nginx:1.30-alpine`, `node:22-alpine`, `python:3.12-alpine`, Temurin 21).
 - Healthchecks are defined once in `docker-compose.yml` using the `wget`
-  built into every Alpine image (busybox). `nginx-backend` and
-  `python-backend` probe `http://127.0.0.1/...` because their listeners are
-  IPv4-only while busybox `wget` resolves `localhost` to `::1` first; the
-  other services use `localhost`. Every service sets
+  built into every Alpine image (busybox). `nginx-backend`, `python-backend`,
+  and the three balanced replicas (`node-backend-1/2/3`) probe
+  `http://127.0.0.1/...` because their listeners are IPv4-only while busybox
+  `wget` resolves `localhost` to `::1` first; `reverse-proxy` and
+  `java-backend` use `localhost`. Every service sets
   `restart: unless-stopped`.
 
 ## Troubleshooting

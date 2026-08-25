@@ -115,11 +115,13 @@ docker compose --profile balanced down
      ```
 
   4. Rebuild the proxy image, then run `scripts/smoke.sh <name>`.
-- **Balancer members must be named services.** `BalancerMember` resolves its
-  hostname once when httpd parses the config; containers added later by
-  `docker compose --scale` are invisible to it. That is why the demo has three
-  explicit services (`node-backend-1/2/3`) in `24-balanced.conf` — grow the
-  balancer by adding a service plus a `BalancerMember` line, never by scaling.
+- **Balancer members must be named services.** Duplicate member URLs collapse
+  into one worker — scaled replicas behind one service name share a single
+  `BalancerMember` URL, so the balancer sees one member. Even if expanded,
+  Docker's DNS round-robin behind one name defeats `byrequests` accounting.
+  That is why the demo has three explicit services (`node-backend-1/2/3`)
+  in `24-balanced.conf` — grow the balancer by adding a service plus a
+  `BalancerMember` line, never by scaling.
 - **Module set stays explicit.** `httpd.conf` loads 17 modules by design;
   a new feature adds its own `LoadModule` lines (the balancer cost three:
   `mod_slotmem_shm`, `mod_proxy_balancer`, `mod_lbmethod_byrequests`).
