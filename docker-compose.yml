@@ -56,6 +56,19 @@ services:
       retries: 3
       start_period: 5s
 
+  python-backend:
+    build: ./backends/python
+    profiles: ["python"]
+    restart: unless-stopped
+    networks:
+      - proxy-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/messages"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
 networks:
   proxy-net:
     driver: bridge
