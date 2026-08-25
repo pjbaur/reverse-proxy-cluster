@@ -1,0 +1,28 @@
+# CI-only Compose override: import/export build cache via GitHub Actions'
+# cache backend. Only .github/workflows/ci.yml merges this file.
+services:
+  reverse-proxy:
+    build:
+      context: ./reverse-proxy
+      cache_from: ["type=gha,scope=reverse-proxy"]
+      cache_to: ["type=gha,mode=max,scope=reverse-proxy"]
+  java-backend:
+    build:
+      context: ./backends/java
+      cache_from: ["type=gha,scope=java-backend"]
+      cache_to: ["type=gha,mode=max,scope=java-backend"]
+  nginx-backend:
+    build:
+      context: ./backends/nginx
+      cache_from: ["type=gha,scope=nginx-backend"]
+      cache_to: ["type=gha,mode=max,scope=nginx-backend"]
+  node-backend:
+    build:
+      context: ./backends/node
+      cache_from: ["type=gha,scope=node-backend"]
+      cache_to: ["type=gha,mode=max,scope=node-backend"]
+  python-backend:
+    build:
+      context: ./backends/python
+      cache_from: ["type=gha,scope=python-backend"]
+      cache_to: ["type=gha,mode=max,scope=python-backend"]

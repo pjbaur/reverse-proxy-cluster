@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  smoke:
+    name: build + smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Generate dev certificate
+        run: scripts/gen-dev-certs.sh
+
+      - name: Build all profiles with layer cache
+        run: |
+          docker compose \
+            -f docker-compose.yml \
+            -f .github/compose.cache.yml \
+            --profile java --profile nginx --profile node --profile python \
+            build
+
+      - name: Smoke test (full stack)
+        run: scripts/smoke.sh
