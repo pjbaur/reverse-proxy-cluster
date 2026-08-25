@@ -26,3 +26,18 @@ services:
       context: ./backends/python
       cache_from: ["type=gha,scope=python-backend"]
       cache_to: ["type=gha,mode=max,scope=python-backend"]
+  node-backend-1:
+    build:
+      context: ./backends/node
+      cache_from: ["type=gha,scope=node-backend"]
+      cache_to: ["type=gha,mode=max,scope=node-backend"]
+  node-backend-2:
+    build:
+      context: ./backends/node
+      cache_from: ["type=gha,scope=node-backend"]
+      cache_to: ["type=gha,mode=max,scope=node-backend"]
+  node-backend-3:
+    build:
+      context: ./backends/node
+      cache_from: ["type=gha,scope=node-backend"]
+      cache_to: ["type=gha,mode=max,scope=node-backend"]

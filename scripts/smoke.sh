@@ -1,7 +1,7 @@
 #!/bin/sh
 # scripts/smoke.sh — the project's test suite.
 #
-# Builds the stack, starts the requested Compose profiles (default: all four),
+# Builds the stack, starts the requested Compose profiles (default: all five),
 # waits until every container reports healthy, then exercises every route and
 # tears the stack down again. All checks run even if one fails (so a single
 # failure doesn't hide others); any failure exits non-zero.
@@ -17,7 +17,7 @@ cd "$ROOT"
 if [ "$#" -gt 0 ]; then
   PROFILES="$*"
 else
-  PROFILES="java nginx node python"
+  PROFILES="java nginx node python balanced"
 fi
 
 PROFILE_ARGS=""
@@ -50,6 +50,25 @@ check_status() {
     ok "$name"
   else
     failed "$name - got HTTP $got, wanted $want"
+  fi
+}
+
+# check_rotates <name> <url> <min-distinct> — fetches 12 times, counts
+# distinct "host" values; round-robin over 3 members must spread >= 2.
+check_rotates() {
+  name="$1"; url="$2"; min="$3"
+  hosts=""
+  i=0
+  while [ "$i" -lt 12 ]; do
+    h="$(curl -fsS "$url" 2>/dev/null | sed -n 's/.*"host":"\([^"]*\)".*/\1/p')" || h=""
+    hosts="$hosts $h"
+    i=$((i + 1))
+  done
+  distinct="$(for h in $hosts; do [ -n "$h" ] && echo "$h"; done | sort -u | grep -c .)" || true
+  if [ "${distinct:-0}" -ge "$min" ]; then
+    ok "$name"
+  else
+    failed "$name - only $distinct distinct hosts (wanted >= $min) from $url"
   fi
 }
 
@@ -102,6 +121,13 @@ for profile in $PROFILES; do
       check "python: /python/messages"                     "$BASE_HTTP/python/messages"  '"backend":"python"'
       check "python: X-Forwarded-Proto=http"               "$BASE_HTTP/python/messages"  '"x_forwarded_proto":"http"'
       check "python: X-Forwarded-Proto=https behind TLS"   "$BASE_HTTPS/python/messages" '"x_forwarded_proto":"https"' -k
+      ;;
+    balanced)
+      check "balanced: /balanced/messages"                "$BASE_HTTP/balanced/messages"   '"backend":"node"'
+      check "balanced: X-Forwarded-Proto=http"            "$BASE_HTTP/balanced/messages"   '"x_forwarded_proto":"http"'
+      check "balanced: /balanced/messages over https"     "$BASE_HTTPS/balanced/messages"  '"backend":"node"' -k
+      check_rotates "balanced: host rotation (>=2 of 3)"  "$BASE_HTTP/balanced/messages"   2
+      check "balanced: balancer-manager dashboard"        "$BASE_HTTP/balancer-manager"    "Load Balancer Manager"
       ;;
     *)
       printf 'unknown profile: %s\n' "$profile" >&2
