@@ -1,0 +1,7 @@
+.trees/
+.DS_Store
+Thumbs.db
+.env
+.env.local
+.env.*.local
+.claude/settings.local.json

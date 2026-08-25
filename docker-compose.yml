@@ -1,0 +1,23 @@
+version: '2'
+services:
+    reverse-proxy:
+        container_name: reverse-proxy
+        build:
+            context: reverse-proxy
+            dockerfile: Dockerfile
+        ports:
+            - 8080:80
+        networks:
+            - spring-cloud-network
+    app-server:
+        container_name: app-server
+        build:
+            context: app-server
+            dockerfile: Dockerfile
+        ports:
+            - 8889:8888
+        networks:
+            - spring-cloud-network
+networks:
+    spring-cloud-network:
+        driver: bridge
