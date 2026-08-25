@@ -1,7 +1,7 @@
 # Patch-pinned: the proxy is the demo's subject — reproducibility matters most here.
 FROM httpd:2.4.68-alpine
 
-# Trimmed base config (2.4-only syntax, 14 modules), lands in the stock path.
+# Trimmed base config (2.4-only syntax, 17 modules), lands in the stock path.
 COPY httpd.conf /usr/local/apache2/conf/httpd.conf
 
 # Per-topic config: status policy, forward headers, one file per backend route,

@@ -17,6 +17,7 @@ the proxy by URL prefix:
 | `/nginx/` | nginx-backend   | `nginx`  | static nginx                 |
 | `/node/`  | node-backend    | `node`   | zero-dependency `node:http`  |
 | `/python/`| python-backend  | `python` | stdlib `http.server`         |
+| `/balanced/` | `balancer://demo` → node-backend-1/2/3 | `balanced` | 3× node replicas behind `mod_proxy_balancer` |
 
 The test suite is `scripts/smoke.sh`; the Java unit tests run inside the
 `java-backend` image build. See README.md for the full architecture.
@@ -27,11 +28,13 @@ The test suite is `scripts/smoke.sh`; the Java unit tests run inside the
 # Generate the dev TLS certificate (required before the proxy image builds)
 scripts/gen-dev-certs.sh
 
-# Start the proxy plus one backend, or all four
+# Start the proxy plus one backend, every backend, or the load-balancing
+# demo (3 node replicas behind mod_proxy_balancer)
 docker compose --profile java up -d --build
-docker compose --profile java --profile nginx --profile node --profile python up -d --build
+docker compose --profile java --profile nginx --profile node --profile python --profile balanced up -d --build
+docker compose --profile balanced up -d --build
 
-# Test suite — all profiles (17 checks) or any subset
+# Test suite — all profiles (22 checks) or any subset
 scripts/smoke.sh
 scripts/smoke.sh java node
 
@@ -41,20 +44,24 @@ docker compose logs -f java-backend
 
 # Tear down — pass the same profiles you started
 docker compose --profile java down
+docker compose --profile balanced down
 ```
 
 ## Structure
 
-- `docker-compose.yml` — all five services, the `proxy-net` network, published
+- `docker-compose.yml` — all eight services (proxy, four single backends,
+  three `balanced` replicas), the `proxy-net` network, published
   ports, and the single source of truth for healthchecks (busybox `wget`).
 - `reverse-proxy/Dockerfile` — patch-pinned base image; bakes in `httpd.conf`,
   `apacheconf/sites/`, the landing page and the dev certificate.
-- `reverse-proxy/httpd.conf` — trimmed, 2.4-only base config (14 modules);
+- `reverse-proxy/httpd.conf` — trimmed, 2.4-only base config (17 modules);
   `IncludeOptional conf/sites/*.conf`.
 - `reverse-proxy/apacheconf/sites/` — numbered per-topic config:
   `00-server-status.conf` (loopback + RFC 1918), `10-proxy.conf`
   (`ProxyRequests Off`, `X-Forwarded-Proto`/`Port`), `20`–`23` one file per
-  backend route, `90-ssl.conf` (the only `<VirtualHost *:443>`; inherits all
+  backend route, `24-balanced.conf` (`balancer://demo` round-robin over
+  node-backend-1/2/3 plus the `/balancer-manager` dashboard),
+  `90-ssl.conf` (the only `<VirtualHost *:443>`; inherits all
   server-level routing).
 - `backends/<name>/` — one self-contained directory per backend (Dockerfile +
   app). Contract: listen on a port; `GET /messages` returns JSON with
@@ -108,6 +115,14 @@ docker compose --profile java down
      ```
 
   4. Rebuild the proxy image, then run `scripts/smoke.sh <name>`.
+- **Balancer members must be named services.** `BalancerMember` resolves its
+  hostname once when httpd parses the config; containers added later by
+  `docker compose --scale` are invisible to it. That is why the demo has three
+  explicit services (`node-backend-1/2/3`) in `24-balanced.conf` — grow the
+  balancer by adding a service plus a `BalancerMember` line, never by scaling.
+- **Module set stays explicit.** `httpd.conf` loads 17 modules by design;
+  a new feature adds its own `LoadModule` lines (the balancer cost three:
+  `mod_slotmem_shm`, `mod_proxy_balancer`, `mod_lbmethod_byrequests`).
 - **Apache 2.4 syntax only** in all proxy configuration.
 - **Pinning:** the proxy is patch-pinned (it is the demo's subject); backends
   are major-pinned.
