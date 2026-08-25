@@ -7,3 +7,4 @@ Thumbs.db
 .claude/settings.local.json
 
 .superpowers/
+reverse-proxy/certs/

@@ -11,7 +11,11 @@ COPY apacheconf/sites/ /usr/local/apache2/conf/sites/
 # Landing page served from DocumentRoot.
 COPY apacheconf/htdocs/ /usr/local/apache2/htdocs/
 
-EXPOSE 80
+# Dev TLS certificate from scripts/gen-dev-certs.sh (gitignored).
+# If this COPY fails with "not found": run scripts/gen-dev-certs.sh, rebuild.
+COPY certs/server.crt certs/server.key /usr/local/apache2/conf/certs/
+
+EXPOSE 80 443
 
 # httpd-foreground is the stock entrypoint of the httpd image (httpd -D FOREGROUND).
 CMD ["httpd-foreground"]
