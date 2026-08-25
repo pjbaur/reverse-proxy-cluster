@@ -35,7 +35,7 @@ Backends publish no ports — the host can only reach them through the proxy.
 
 ## Quickstart
 
-Requires Docker (Compose v2) and OpenSSL >= 1.1.1.
+Requires Docker (Compose v2), OpenSSL >= 1.1.1, and curl.
 
 ```sh
 # 1. Generate the self-signed dev certificate (gitignored; the build needs it)

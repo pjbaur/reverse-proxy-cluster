@@ -9,3 +9,4 @@ Thumbs.db
 .superpowers/
 reverse-proxy/certs/
 target/
+__pycache__/
