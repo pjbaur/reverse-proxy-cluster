@@ -80,7 +80,7 @@ docker compose --profile java down
 | `GET /nginx/messages` | nginx-backend | `nginx`      | static JSON file                            |
 | `GET /node/messages`| node-backend   | `node`        | JSON; echoes `X-Forwarded-*` headers        |
 | `GET /python/messages` | python-backend | `python`   | JSON; echoes `X-Forwarded-*` headers        |
-| `GET /balanced/messages` | `balancer://demo` | `balanced` | JSON; `host` is the serving replica's container hostname |
+| `GET /balanced/messages` | `balancer://demo` | `balanced` | JSON; `host` names the replica that answered |
 | `GET /balancer-manager` | reverse-proxy | —             | `mod_proxy_balancer` dashboard              |
 | `GET /server-status` | reverse-proxy | —             | Apache `mod_status` page                    |
 | any other path      | reverse-proxy  | —             | 404                                         |
@@ -113,12 +113,12 @@ backend (`node-backend-1` … `node-backend-3`) behind Apache's own
 # 1. Start the proxy plus the three replicas
 docker compose --profile balanced up -d --build
 
-# 2. Ask repeatedly — the "host" field rotates through the three replicas
+# 2. Ask repeatedly — the "host" field names the replica that answered
 for i in 1 2 3 4 5 6; do
   curl -s http://localhost:8080/balanced/messages | grep -o '"host":"[^"]*"'
 done
-# "host":"a1b2c3d4e5f6" / "host":"9f8e7d6c5b4a" / ... — a different replica
-# each time (byrequests round-robin)
+# "host":"node-backend-1" / "node-backend-2" / "node-backend-3" — one
+# replica per request (byrequests round-robin)
 
 # 3. Same route over TLS — the *:443 vhost inherits the balancer
 curl -k https://localhost:8443/balanced/messages
@@ -127,11 +127,10 @@ curl -k https://localhost:8443/balanced/messages
 docker compose --profile balanced down
 ```
 
-`host` is the serving container's Docker hostname — the generated container
-ID, because the replicas define no `hostname:`. Each replica has its own, so
-the changing value is the rotation made visible; map an ID to its service
-with `docker ps --format '{{.ID}} {{.Names}}'`, or watch the per-member
-request counters in the dashboard.
+`host` is the serving container's hostname — `node-backend-1`, `-2` or `-3`.
+Each replica service sets `hostname:` in `docker-compose.yml` so the JSON
+names the member directly; without it, Docker's generated container ID (an
+opaque hex string) would appear instead.
 
 The live dashboard at `http://localhost:8080/balancer-manager` lists every
 member with its request count (`Elected`), lbfactor and status, and manages

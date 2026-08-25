@@ -71,6 +71,7 @@ services:
 
   node-backend-1:
     build: ./backends/node
+    hostname: node-backend-1
     profiles: ["balanced"]
     restart: unless-stopped
     networks:
@@ -84,6 +85,7 @@ services:
 
   node-backend-2:
     build: ./backends/node
+    hostname: node-backend-2
     profiles: ["balanced"]
     restart: unless-stopped
     networks:
@@ -97,6 +99,7 @@ services:
 
   node-backend-3:
     build: ./backends/node
+    hostname: node-backend-3
     profiles: ["balanced"]
     restart: unless-stopped
     networks:
