@@ -1,0 +1,1 @@
+{"backend":"nginx","message":"Hello from nginx static content","host":"nginx-backend","note":"static file - host is not dynamic here"}
