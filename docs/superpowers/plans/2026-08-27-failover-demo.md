@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Apache 2.4-only syntax; server-level directives only (no new vhosts); `retry=0` on every worker/proxy directive.
+- Apache 2.4-only syntax; server-level directives only (no new vhosts); `retry=0` on every worker/proxy directive — **except** the failover primary `BalancerMember`, which carries `retry=5`: `retry=0` wipes the worker error state, hot standby never activates, every request re-elects the dead primary (503 loop; discovered during Task 1 implementation).
 - Healthchecks probe `127.0.0.1`, live in docker-compose.yml only.
 - No published ports for backends; everything reachable via the proxy (8080/8443).
 - gha cache entries carry `scope=`; both failover services share the existing scope `node-backend`.
@@ -74,13 +74,16 @@ Identical to the `node-backend-1` shape except the service name, `hostname:`, an
 # /failover/... -> balancer://failover (active primary + hot standby,
 # Compose profile "failover"). The primary serves everything while healthy;
 # the standby (H) answers only while the primary is in error state.
-# retry=0 = no 60 s error-state window, so recovery is instant on restart.
+# Primary retry=5 keeps a bounded error window so the standby activates
+# and the primary recovers within 5 s (retry=0 on the primary wipes the
+# error state and breaks hot standby); standby retry=0 for instant
+# activation.
 <Proxy "balancer://failover">
-    BalancerMember "http://node-backend-primary:8080" retry=0
+    BalancerMember "http://node-backend-primary:8080" retry=5
     BalancerMember "http://node-backend-standby:8080" retry=0 status=+H
     ProxySet lbmethod=byrequests
 </Proxy>
-ProxyPass        "/failover/" "balancer://failover/" retry=0
+ProxyPass        "/failover/" "balancer://failover/"
 ProxyPassReverse "/failover/" "balancer://failover/"
 ```
 
@@ -103,10 +106,11 @@ for i in 1 2 3 4 5 6; do curl -fsS http://localhost:8080/failover/messages | gre
 docker compose --profile failover up -d --wait node-backend-primary
 curl -fsS http://localhost:8080/failover/messages | grep -o '"host":"[^"]*"'
    # "host":"node-backend-primary" again          <-- the recovery
+   # (the --wait outlasts the 5 s error window)
 docker compose --profile failover down --remove-orphans
 ```
 
-**Known risks:** If any curl during the stopped-primary phase returns 502 instead of the standby's JSON, stop and investigate — the hot-standby deferral is the feature; do not add retries to mask it. If `--wait` on the restart is slow, that is the healthcheck interval (10 s), not a bug; the wait is bounded by Compose's default timeout.
+**Known risks:** If any curl during the stopped-primary phase returns 502/503 instead of the standby's JSON, stop and investigate — the hot-standby deferral is the feature; do not add retries to mask it. (Historical note: the original `retry=0` on the primary caused exactly this — see Global Constraints.) If `--wait` on the restart is slow, that is the healthcheck interval (10 s), not a bug; the wait is bounded by Compose's default timeout.
 
 - [ ] **Step 4: Commit**
 
@@ -115,8 +119,10 @@ feat(proxy): failover profile demo with hot standby
 
 - node-backend-primary + node-backend-standby under Compose profile
   "failover" (explicit hostname: so the JSON host names the member)
-- sites/25-failover.conf: balancer://failover, standby marked status=+H,
-  retry=0 for instant recovery; no new modules (still 17)
+- sites/25-failover.conf: balancer://failover, standby marked status=+H;
+  primary retry=5 keeps a bounded error window so the standby activates and
+  the primary recovers within 5 s (retry=0 on the primary wipes the error
+  state and breaks hot standby); no new modules (still 17)
 ```
 
 ---
@@ -286,9 +292,12 @@ The `failover` profile adds a hot-standby pair: the node backend twice
 (`node-backend-primary` + `node-backend-standby`) behind
 `balancer://failover` in `reverse-proxy/apacheconf/sites/25-failover.conf`.
 The primary serves everything; the standby — marked `status=+H` — only
-answers while the primary is in error state. `retry=0` means no 60 s
-error-state window, so the primary is retried on the very next request
-once it is back:
+answers while the primary is in error state. The primary carries
+`retry=5`, not the project's usual `retry=0`: hot standby engages through
+the worker error state, which `retry=0` would wipe instantly (every
+request would re-elect the dead primary and 503). The bounded 5 s window
+activates the standby the moment the primary fails and re-elects the
+primary within 5 s of it returning:
 
 ```sh
 docker compose --profile failover up -d --build
@@ -318,10 +327,12 @@ docker compose --profile failover down
 
 ```markdown
   - `25-failover.conf` — the hot-standby pair: `<Proxy "balancer://failover">`
-    with `node-backend-primary` and `node-backend-standby` (`status=+H`,
-    both `retry=0`) and the `/failover/` `ProxyPass`/`ProxyPassReverse`
-    pair. Same worker-parameters rule as 24: `retry=0` lives on the
-    `BalancerMember` lines, not the balancer `ProxyPass`.
+    with `node-backend-primary` (`retry=5`) and `node-backend-standby`
+    (`retry=0 status=+H`) and the `/failover/` `ProxyPass`/`ProxyPassReverse`
+    pair. The primary's `retry=5` is deliberate: hot standby engages through
+    the worker error state, which `retry=0` would wipe (standby never
+    activates). Same worker-parameters rule as 24: worker parameters live on
+    the `BalancerMember` lines, not the balancer `ProxyPass`.
 ```
 
 9. Healthchecks paragraph (lines 211-212): extend `and the three balanced replicas (`node-backend-1/2/3`)` to also name `the failover pair (`node-backend-primary`/`node-backend-standby`)`.
@@ -352,11 +363,13 @@ docker compose --profile failover up -d --build   # hot-standby failover demo
 5. Conventions: add bullet after the "Balancer members must be named services" bullet:
 
 ```markdown
-- **Hot standby needs `status=+H` and `hostname:`.** Mark the spare
-  `status=+H` so it serves only when the primary is in error state, give
-  both services explicit `hostname:` keys (the JSON `host` field is the
-  container hostname — a missing key shows the container ID), and keep
-  `retry=0` so a restarted primary recovers on the next request.
+- **Hot standby needs `status=+H`, `hostname:`, and a real error window.**
+  Mark the spare `status=+H` so it serves only when the primary is in error
+  state, give both services explicit `hostname:` keys (the JSON `host` field
+  is the container hostname — a missing key shows the container ID), and keep
+  the primary's retry small but nonzero (`retry=5`) — the error window is
+  what activates the standby (`retry=0` wipes it; the standby never engages)
+  and it expires fast enough that recovery feels instant.
 ```
 
 - [ ] **Step 3: Landing page** — `reverse-proxy/apacheconf/htdocs/index.html`, after the `/balanced/messages` `<li>`:

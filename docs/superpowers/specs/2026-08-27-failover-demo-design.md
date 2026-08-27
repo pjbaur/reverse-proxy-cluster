@@ -33,8 +33,16 @@ shifts traffic to a standby and back on recovery.
 - **Smoke does a live stop + restart of the primary.** A failover demo that never
   kills anything demonstrates nothing. The suite stops the primary container
   mid-run, asserts the standby serves, restarts the primary, asserts recovery.
-- **`retry=0` everywhere** (project convention) doubles as the instant-recovery
-  story: no 60 s worker error-state window after the primary returns.
+- **Retry split (corrected during implementation):** the primary
+  `BalancerMember` carries `retry=5`, the standby `retry=0`, the
+  `ProxyPass` pair nothing. Hot standby activates only while the primary's
+  worker sits in error state — `retry=0` (the project's usual convention)
+  wipes that state instantly, so every request re-elects the dead primary
+  and returns 503 (measured; log shows `disabling worker ... for 0s`).
+  `retry=5` keeps a bounded error window: standby serves the moment the
+  primary fails, and the primary is re-elected within 5 s of returning.
+  The plain per-backend `ProxyPass` routes keep `retry=0` — nothing there
+  depends on error state.
 
 ## Design
 
@@ -74,13 +82,16 @@ One file, one topic, numeric prefix next after 24:
 # /failover/... -> balancer://failover (active primary + hot standby,
 # Compose profile "failover"). The primary serves everything while healthy;
 # the standby (H) answers only while the primary is in error state.
-# retry=0 = no 60 s error-state window, so recovery is instant on restart.
+# Primary retry=5 keeps a bounded error window so the standby activates
+# and the primary recovers within 5 s (retry=0 on the primary wipes the
+# error state and breaks hot standby); standby retry=0 for instant
+# activation.
 <Proxy "balancer://failover">
-    BalancerMember "http://node-backend-primary:8080" retry=0
+    BalancerMember "http://node-backend-primary:8080" retry=5
     BalancerMember "http://node-backend-standby:8080" retry=0 status=+H
     ProxySet lbmethod=byrequests
 </Proxy>
-ProxyPass        "/failover/" "balancer://failover/" retry=0
+ProxyPass        "/failover/" "balancer://failover/"
 ProxyPassReverse "/failover/" "balancer://failover/"
 ```
 
@@ -93,8 +104,9 @@ the standby's `H` mark alongside `balancer://demo`.
 `curl localhost:8080/failover/messages` repeatedly — `host` is always
 `node-backend-primary`. `docker compose --profile failover stop node-backend-primary`
 — the same curls now answer `host: node-backend-standby`. Restart the primary
-(`docker compose --profile failover up -d node-backend-primary`) and the next
-requests return to the primary. Same sequence works over `https://localhost:8443`;
+(`docker compose --profile failover up -d --wait node-backend-primary`) and the
+next requests return to the primary (the 5 s error window expires while the
+healthcheck turns healthy). Same sequence works over `https://localhost:8443`;
 `/balancer-manager` shows the standby's counts staying zero until the failover.
 
 ### smoke.sh
@@ -116,7 +128,9 @@ Case block, 5 checks:
 4. **Failover check:** `docker compose --profile failover stop node-backend-primary`,
    then 6 requests, every `host` = `node-backend-standby`.
 5. **Recovery check:** `docker compose --profile failover up -d --wait
-   node-backend-primary`, then 6 requests, every `host` = `node-backend-primary`.
+   node-backend-primary`, then 6 requests, every `host` = `node-backend-primary`
+   (the `--wait` outlasts the 5 s error window, so the primary is re-elected
+   immediately; recovery via `retry=5`).
 
 Full-suite check count rises from 22 to 27 (4 proxy + 4 java + 3 nginx + 3 node +
 3 python + 5 balanced + 5 failover); `smoke.sh failover` alone = 9 (4 proxy + 5).
