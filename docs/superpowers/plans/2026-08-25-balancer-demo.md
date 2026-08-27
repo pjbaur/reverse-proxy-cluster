@@ -32,7 +32,7 @@
 **Interfaces:**
 - Produces: profile `balanced` with services `node-backend-1`, `node-backend-2`, `node-backend-3` (DNS names on `proxy-net`, port 8080); route `GET /balanced/messages` → `{"backend":"node",...,"host":"<replica>",...}`; `GET /balancer-manager` → dashboard. Consumed by Tasks 2 (smoke) and 3 (docs).
 
-- [ ] **Step 1: Append three services to `docker-compose.yml`**
+- [x] **Step 1: Append three services to `docker-compose.yml`**
 
 ```yaml
   node-backend-1:
@@ -51,7 +51,7 @@
 
 `node-backend-2` and `node-backend-3`: identical, only the service-name key differs.
 
-- [ ] **Step 2: Edit `reverse-proxy/httpd.conf` module block** — after the `proxy_http` pair add:
+- [x] **Step 2: Edit `reverse-proxy/httpd.conf` module block** — after the `proxy_http` pair add:
 
 ```apache
 # load balancing (slotmem backs the balancer's shared worker state)
@@ -62,7 +62,7 @@ LoadModule lbmethod_byrequests_module modules/mod_lbmethod_byrequests.so
 
 Update the module-count comment from 14 to 17 (it reads `# --- modules (14: incl. TLS pair socache_shmcb + ssl) ...` — rewrite as `# --- modules (17: proxy core+balancer, TLS pair, status, headers) -------` or similar accurate wording).
 
-- [ ] **Step 3: Create `reverse-proxy/apacheconf/sites/24-balanced.conf`**
+- [x] **Step 3: Create `reverse-proxy/apacheconf/sites/24-balanced.conf`**
 
 ```apache
 # /balanced/... -> balancer://demo (three node replicas, Compose profile "balanced").
@@ -84,7 +84,7 @@ ProxyPassReverse "/balanced/" "balancer://demo/"
 </Location>
 ```
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 ```sh
 docker compose --profile balanced up -d --build --wait
@@ -101,7 +101,7 @@ docker compose --profile balanced down --remove-orphans
 
 **Known risk + fallback:** if `httpd -t` rejects `ProxyPassReverse "/balanced/" "balancer://demo/"`, drop the `ProxyPassReverse` line entirely (Location headers from these backends are absolute-path-free JSON responses; the directive is convention here, not function) and note the deviation in the report. Do not substitute per-member ProxyPassReverse lines.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 feat(proxy): balanced profile demo with mod_proxy_balancer
@@ -125,13 +125,13 @@ feat(proxy): balanced profile demo with mod_proxy_balancer
 - Consumes: route + dashboard from Task 1 (`/balanced/messages`, `/balancer-manager`).
 - Produces: full-suite expectation 22 passed / 0 failed; `smoke.sh balanced` → 9.
 
-- [ ] **Step 1: Edit `scripts/smoke.sh`** — change the default line to:
+- [x] **Step 1: Edit `scripts/smoke.sh`** — change the default line to:
 
 ```sh
   PROFILES="java nginx node python balanced"
 ```
 
-- [ ] **Step 2: Add a rotation helper + case block.** Helper (place after `check_status`):
+- [x] **Step 2: Add a rotation helper + case block.** Helper (place after `check_status`):
 
 ```sh
 # check_rotates <name> <url> <min-distinct> — fetches 12 times, counts
@@ -168,7 +168,7 @@ Case inside the profile loop (after `python)`):
 
 (Update the header comment's profile list if it names the defaults.)
 
-- [ ] **Step 3: Extend `.github/compose.cache.yml`** — add:
+- [x] **Step 3: Extend `.github/compose.cache.yml`** — add:
 
 ```yaml
   node-backend-1:
@@ -188,9 +188,9 @@ Case inside the profile loop (after `python)`):
       cache_to: ["type=gha,mode=max,scope=node-backend"]
 ```
 
-- [ ] **Step 4: Edit `.github/workflows/ci.yml`** — build step profile list gains `--profile balanced`.
+- [x] **Step 4: Edit `.github/workflows/ci.yml`** — build step profile list gains `--profile balanced`.
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 ```sh
 sh -n scripts/smoke.sh && echo SYNTAX-OK
@@ -200,7 +200,7 @@ scripts/smoke.sh balanced    # 9 passed, 0 failed
 scripts/smoke.sh             # 22 passed, 0 failed
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```
 test: smoke and CI coverage for the balanced profile
@@ -219,11 +219,11 @@ test: smoke and CI coverage for the balanced profile
 
 **Interfaces:** Consumes Tasks 1-2 (route, dashboard, 22-check suite).
 
-- [ ] **Step 1: README.md** — architecture diagram gains the balanced branch (proxy → balancer://demo → node-backend-1/2/3, profile `balanced`); service table gains the three replicas (profile `balanced`, route `/balanced/`); routes table gains `GET /balanced/messages` (JSON; `host` shows which replica) and `GET /balancer-manager` (dashboard, loopback+RFC1918); new short section "Load-balancing demo" (start command, repeated curl showing rotating `host`, manager URL, drain-a-member trick, https variant); check-count references 17 → 22; module count 14 → 17 wherever stated; configuration-model bullet for `24-balanced.conf`.
-- [ ] **Step 2: CLAUDE.md** — profile table gains `/balanced/` → `balancer://demo` (profile `balanced`, 3× node replicas); Commands gain the balanced up/down; Structure bullet for `24-balanced.conf`; Conventions gains: balancer members must be named services (DNS resolves once at start — `--scale` breaks `BalancerMember`); module count 14 → 17.
-- [ ] **Step 3: Landing page** — `htdocs/index.html` route list gains `<li><code>GET /balanced/messages</code> — load-balanced across 3 node replicas (<code>--profile balanced</code>)</li>` (match existing markup).
-- [ ] **Step 4: Verify** — `docker compose --profile balanced up -d --build --wait` (rebuild picks up new landing page), `curl -fsS http://localhost:8080/ | grep -q balanced`, spot-check every documented claim against files (`grep -c LoadModule reverse-proxy/httpd.conf` = 17), `scripts/smoke.sh balanced` still 9/0, `docker compose --profile balanced down --remove-orphans`.
-- [ ] **Step 5: Commit**
+- [x] **Step 1: README.md** — architecture diagram gains the balanced branch (proxy → balancer://demo → node-backend-1/2/3, profile `balanced`); service table gains the three replicas (profile `balanced`, route `/balanced/`); routes table gains `GET /balanced/messages` (JSON; `host` shows which replica) and `GET /balancer-manager` (dashboard, loopback+RFC1918); new short section "Load-balancing demo" (start command, repeated curl showing rotating `host`, manager URL, drain-a-member trick, https variant); check-count references 17 → 22; module count 14 → 17 wherever stated; configuration-model bullet for `24-balanced.conf`.
+- [x] **Step 2: CLAUDE.md** — profile table gains `/balanced/` → `balancer://demo` (profile `balanced`, 3× node replicas); Commands gain the balanced up/down; Structure bullet for `24-balanced.conf`; Conventions gains: balancer members must be named services (DNS resolves once at start — `--scale` breaks `BalancerMember`); module count 14 → 17.
+- [x] **Step 3: Landing page** — `htdocs/index.html` route list gains `<li><code>GET /balanced/messages</code> — load-balanced across 3 node replicas (<code>--profile balanced</code>)</li>` (match existing markup).
+- [x] **Step 4: Verify** — `docker compose --profile balanced up -d --build --wait` (rebuild picks up new landing page), `curl -fsS http://localhost:8080/ | grep -q balanced`, spot-check every documented claim against files (`grep -c LoadModule reverse-proxy/httpd.conf` = 17), `scripts/smoke.sh balanced` still 9/0, `docker compose --profile balanced down --remove-orphans`.
+- [x] **Step 5: Commit**
 
 ```
 docs: document the balanced profile load-balancing demo

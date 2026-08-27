@@ -99,7 +99,7 @@ reverse-proxy-cluster/
 
 **Files:** Modify `reverse-proxy/Dockerfile`, `reverse-proxy/httpd.conf`; Create `reverse-proxy/apacheconf/sites/00-server-status.conf`, `10-proxy.conf`, `reverse-proxy/apacheconf/htdocs/index.html`; Delete `reverse-proxy/apacheconf/sites/testlocal.conf`, `reverse-proxy/apacheconf/htmlfiles/`.
 
-- [ ] **Step 1: Rewrite `reverse-proxy/Dockerfile`**
+- [x] **Step 1: Rewrite `reverse-proxy/Dockerfile`**
 
 ```dockerfile
 # Patch-pinned: the proxy is the demo's subject — reproducibility matters most here.
@@ -123,7 +123,7 @@ CMD ["httpd-foreground"]
 
 No package installs (busybox wget covers healthchecks on alpine).
 
-- [ ] **Step 2: Replace `reverse-proxy/httpd.conf`**
+- [x] **Step 2: Replace `reverse-proxy/httpd.conf`**
 
 ```apache
 # reverse-proxy-cluster — base Apache configuration.
@@ -192,7 +192,7 @@ DirectoryIndex index.html
 IncludeOptional conf/sites/*.conf
 ```
 
-- [ ] **Step 3: Create `reverse-proxy/apacheconf/sites/00-server-status.conf`**
+- [x] **Step 3: Create `reverse-proxy/apacheconf/sites/00-server-status.conf`**
 
 ```apache
 # /server-status — mod_status diagnostics.
@@ -207,7 +207,7 @@ ExtendedStatus On
 </Location>
 ```
 
-- [ ] **Step 4: Create `reverse-proxy/apacheconf/sites/10-proxy.conf`**
+- [x] **Step 4: Create `reverse-proxy/apacheconf/sites/10-proxy.conf`**
 
 ```apache
 # Reverse-proxy behaviour shared by every backend route (server level:
@@ -226,7 +226,7 @@ RequestHeader set X-Forwarded-Port  "expr=%{SERVER_PORT}"
 # 60s worker error-state after one failed connect would flake dev workflows.
 ```
 
-- [ ] **Step 5: Create `reverse-proxy/apacheconf/htdocs/index.html`**
+- [x] **Step 5: Create `reverse-proxy/apacheconf/htdocs/index.html`**
 
 ```html
 <!doctype html>
@@ -257,9 +257,9 @@ RequestHeader set X-Forwarded-Port  "expr=%{SERVER_PORT}"
 </html>
 ```
 
-- [ ] **Step 6: Delete old confs** — `git rm reverse-proxy/apacheconf/sites/testlocal.conf && git rm -r reverse-proxy/apacheconf/htmlfiles`
+- [x] **Step 6: Delete old confs** — `git rm reverse-proxy/apacheconf/sites/testlocal.conf && git rm -r reverse-proxy/apacheconf/htmlfiles`
 
-- [ ] **Step 7: Verify standalone (old compose untouched)**
+- [x] **Step 7: Verify standalone (old compose untouched)**
 
 ```sh
 docker build -t proxy-tmp reverse-proxy/
@@ -274,7 +274,7 @@ docker exec proxy-tmp httpd -M | grep -c "ssl_module\|access_compat"          # 
 docker rm -f proxy-tmp
 ```
 
-- [ ] **Step 8: Commit** (includes untracked `docs/REVIEW.md` as historical record)
+- [x] **Step 8: Commit** (includes untracked `docs/REVIEW.md` as historical record)
 
 ```
 feat(proxy): pin httpd 2.4.68-alpine, trim modules, 2.4-only config
@@ -286,7 +286,7 @@ feat(proxy): pin httpd 2.4.68-alpine, trim modules, 2.4-only config
 
 **Files:** Replace `docker-compose.yml`; Delete `app-server/`, `start-command.txt`.
 
-- [ ] **Step 1: Replace `docker-compose.yml`** (proxy-only at this commit; backends appended in Tasks 5–8)
+- [x] **Step 1: Replace `docker-compose.yml`** (proxy-only at this commit; backends appended in Tasks 5–8)
 
 ```yaml
 name: reverse-proxy-cluster
@@ -312,9 +312,9 @@ networks:
     driver: bridge
 ```
 
-- [ ] **Step 2: Delete** — `git rm -r app-server && git rm start-command.txt`
+- [x] **Step 2: Delete** — `git rm -r app-server && git rm start-command.txt`
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```sh
 docker compose config -q                              # valid, no version-key warning
@@ -325,7 +325,7 @@ curl -fsS http://localhost:8080/server-status >/dev/null && echo STATUS-OK
 docker compose down
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```
 feat(compose)!: profile-based stack with proxy-only base
@@ -339,7 +339,7 @@ Body: drop obsolete version key; `spring-cloud-network` → `proxy-net`; restart
 
 **Files:** Create `scripts/gen-dev-certs.sh`; Modify `.gitignore`, `reverse-proxy/httpd.conf`, `reverse-proxy/Dockerfile`, `docker-compose.yml`; Create `reverse-proxy/apacheconf/sites/90-ssl.conf`.
 
-- [ ] **Step 1: Create `scripts/gen-dev-certs.sh`** (+ `chmod +x`)
+- [x] **Step 1: Create `scripts/gen-dev-certs.sh`** (+ `chmod +x`)
 
 ```sh
 #!/bin/sh
@@ -366,13 +366,13 @@ echo "Wrote $CERT_DIR/server.crt"
 echo "Wrote $CERT_DIR/server.key"
 ```
 
-- [ ] **Step 2: Append to `.gitignore`**
+- [x] **Step 2: Append to `.gitignore`**
 
 ```
 reverse-proxy/certs/
 ```
 
-- [ ] **Step 3: Edit `reverse-proxy/httpd.conf`** — after `Listen 80` add `Listen 443`; add to module block:
+- [x] **Step 3: Edit `reverse-proxy/httpd.conf`** — after `Listen 80` add `Listen 443`; add to module block:
 
 ```apache
 Listen 443
@@ -381,7 +381,7 @@ LoadModule socache_shmcb_module modules/mod_socache_shmcb.so
 LoadModule ssl_module modules/mod_ssl.so
 ```
 
-- [ ] **Step 4: Create `reverse-proxy/apacheconf/sites/90-ssl.conf`**
+- [x] **Step 4: Create `reverse-proxy/apacheconf/sites/90-ssl.conf`**
 
 ```apache
 # HTTPS listener. Self-signed dev certificate generated by
@@ -411,7 +411,7 @@ LoadModule ssl_module modules/mod_ssl.so
 #   </VirtualHost>
 ```
 
-- [ ] **Step 5: Edit `reverse-proxy/Dockerfile`** — add before `EXPOSE`; change `EXPOSE 80` → `EXPOSE 80 443`
+- [x] **Step 5: Edit `reverse-proxy/Dockerfile`** — add before `EXPOSE`; change `EXPOSE 80` → `EXPOSE 80 443`
 
 ```dockerfile
 # Dev TLS certificate from scripts/gen-dev-certs.sh (gitignored).
@@ -419,7 +419,7 @@ LoadModule ssl_module modules/mod_ssl.so
 COPY certs/server.crt certs/server.key /usr/local/apache2/conf/certs/
 ```
 
-- [ ] **Step 6: Edit `docker-compose.yml`** proxy ports:
+- [x] **Step 6: Edit `docker-compose.yml`** proxy ports:
 
 ```yaml
     ports:
@@ -427,7 +427,7 @@ COPY certs/server.crt certs/server.key /usr/local/apache2/conf/certs/
       - "8443:443"
 ```
 
-- [ ] **Step 7: Verify**
+- [x] **Step 7: Verify**
 
 ```sh
 scripts/gen-dev-certs.sh
@@ -443,7 +443,7 @@ echo | openssl s_client -connect localhost:8443 2>/dev/null | grep -E "Protocol|
 docker compose down
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```
 feat(proxy): self-signed HTTPS listener published on 8443
@@ -455,7 +455,7 @@ feat(proxy): self-signed HTTPS listener published on 8443
 
 **Files (all new):** `backends/java/pom.xml`, `src/main/java/com/example/messages/MessageServerApplication.java`, `MessageController.java`, `src/main/resources/application.properties`, `src/test/java/com/example/messages/MessageControllerTest.java`, `Dockerfile`.
 
-- [ ] **Step 1: Write failing test** `backends/java/src/test/java/com/example/messages/MessageControllerTest.java`
+- [x] **Step 1: Write failing test** `backends/java/src/test/java/com/example/messages/MessageControllerTest.java`
 
 ```java
 package com.example.messages;
@@ -501,7 +501,7 @@ class MessageControllerTest {
 }
 ```
 
-- [ ] **Step 2: Write `backends/java/pom.xml`**
+- [x] **Step 2: Write `backends/java/pom.xml`**
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -550,7 +550,7 @@ class MessageControllerTest {
 </project>
 ```
 
-- [ ] **Step 3: Write main classes.** `MessageServerApplication.java`:
+- [x] **Step 3: Write main classes.** `MessageServerApplication.java`:
 
 ```java
 package com.example.messages;
@@ -622,7 +622,7 @@ public class MessageController {
 server.port=8080
 ```
 
-- [ ] **Step 4: Write `backends/java/Dockerfile`**
+- [x] **Step 4: Write `backends/java/Dockerfile`**
 
 ```dockerfile
 # ---- build: compile and TEST (tests run on every image build) ---------------
@@ -647,7 +647,7 @@ EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]
 ```
 
-- [ ] **Step 5: Verify** — run test before writing impl? Controller is Step 3; run tests now (host has JDK 21 + Maven):
+- [x] **Step 5: Verify** — run test before writing impl? Controller is Step 3; run tests now (host has JDK 21 + Maven):
 
 ```sh
 cd backends/java && mvn -q test && cd ../..          # 3 tests pass
@@ -663,7 +663,7 @@ docker rm -f java-tmp
 
 If `WGET-OK` fails: switch runtime base to `eclipse-temurin:21-jre` + `curl -fsS` healthcheck in Task 5 (D6 fallback).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```
 feat(java): Spring Boot 3.5 message backend source with multi-stage build
@@ -675,7 +675,7 @@ feat(java): Spring Boot 3.5 message backend source with multi-stage build
 
 **Files:** Modify `docker-compose.yml`; Create `reverse-proxy/apacheconf/sites/20-java.conf`.
 
-- [ ] **Step 1: Append service to `docker-compose.yml`**
+- [x] **Step 1: Append service to `docker-compose.yml`**
 
 ```yaml
   java-backend:
@@ -692,7 +692,7 @@ feat(java): Spring Boot 3.5 message backend source with multi-stage build
       start_period: 20s
 ```
 
-- [ ] **Step 2: Create `reverse-proxy/apacheconf/sites/20-java.conf`**
+- [x] **Step 2: Create `reverse-proxy/apacheconf/sites/20-java.conf`**
 
 ```apache
 # /java/... -> java-backend (Spring Boot 3.5, Compose profile "java").
@@ -703,7 +703,7 @@ ProxyPass        /java/ http://java-backend:8080/ retry=0
 ProxyPassReverse /java/ http://java-backend:8080/
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```sh
 docker compose --profile java up -d --build --wait
@@ -715,7 +715,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/node/messages   #
 docker compose down --remove-orphans
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```
 feat(java): serve /java/ via profile java
@@ -727,7 +727,7 @@ feat(java): serve /java/ via profile java
 
 **Files:** Create `backends/nginx/{Dockerfile,nginx.conf,html/index.html,html/messages}`; Modify `docker-compose.yml`; Create `reverse-proxy/apacheconf/sites/21-nginx.conf`.
 
-- [ ] **Step 1: `backends/nginx/Dockerfile`**
+- [x] **Step 1: `backends/nginx/Dockerfile`**
 
 ```dockerfile
 FROM nginx:1.30-alpine
@@ -737,7 +737,7 @@ EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
 ```
 
-- [ ] **Step 2: `backends/nginx/nginx.conf`**
+- [x] **Step 2: `backends/nginx/nginx.conf`**
 
 ```nginx
 # Static backend served by its own nginx container (profile "nginx").
@@ -760,7 +760,7 @@ server {
 }
 ```
 
-- [ ] **Step 3: `backends/nginx/html/index.html`** (relative href resolves to `/nginx/messages` through the proxy)
+- [x] **Step 3: `backends/nginx/html/index.html`** (relative href resolves to `/nginx/messages` through the proxy)
 
 ```html
 <!doctype html>
@@ -776,13 +776,13 @@ server {
 </html>
 ```
 
-- [ ] **Step 4: `backends/nginx/html/messages`** (extension-less static JSON; `host` static by design — the contrast this backend demonstrates)
+- [x] **Step 4: `backends/nginx/html/messages`** (extension-less static JSON; `host` static by design — the contrast this backend demonstrates)
 
 ```json
 {"backend":"nginx","message":"Hello from nginx static content","host":"nginx-backend","note":"static file - host is not dynamic here"}
 ```
 
-- [ ] **Step 5: Append service to `docker-compose.yml`**
+- [x] **Step 5: Append service to `docker-compose.yml`**
 
 ```yaml
   nginx-backend:
@@ -799,7 +799,7 @@ server {
       start_period: 5s
 ```
 
-- [ ] **Step 6: Create `reverse-proxy/apacheconf/sites/21-nginx.conf`**
+- [x] **Step 6: Create `reverse-proxy/apacheconf/sites/21-nginx.conf`**
 
 ```apache
 # /nginx/... -> nginx-backend (static content, Compose profile "nginx").
@@ -807,7 +807,7 @@ ProxyPass        /nginx/ http://nginx-backend:80/ retry=0
 ProxyPassReverse /nginx/ http://nginx-backend:80/
 ```
 
-- [ ] **Step 7: Verify**
+- [x] **Step 7: Verify**
 
 ```sh
 docker compose --profile nginx up -d --build --wait
@@ -818,7 +818,7 @@ curl -kfsS https://localhost:8443/nginx/ | grep -q "nginx backend" && echo TLS-O
 docker compose down --remove-orphans
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```
 feat(nginx): static nginx backend served at /nginx/ via profile nginx
@@ -830,7 +830,7 @@ feat(nginx): static nginx backend served at /nginx/ via profile nginx
 
 **Files:** Create `backends/node/{server.js,Dockerfile}`; Modify `docker-compose.yml`; Create `reverse-proxy/apacheconf/sites/22-node.conf`.
 
-- [ ] **Step 1: `backends/node/server.js`**
+- [x] **Step 1: `backends/node/server.js`**
 
 ```js
 // Zero-dependency Node backend (profile "node"): node's built-in http module,
@@ -868,7 +868,7 @@ server.listen(PORT, () => {
 });
 ```
 
-- [ ] **Step 2: `backends/node/Dockerfile`**
+- [x] **Step 2: `backends/node/Dockerfile`**
 
 ```dockerfile
 FROM node:22-alpine
@@ -879,7 +879,7 @@ EXPOSE 8080
 CMD ["node", "server.js"]
 ```
 
-- [ ] **Step 3: Append service to `docker-compose.yml`**
+- [x] **Step 3: Append service to `docker-compose.yml`**
 
 ```yaml
   node-backend:
@@ -896,7 +896,7 @@ CMD ["node", "server.js"]
       start_period: 5s
 ```
 
-- [ ] **Step 4: Create `reverse-proxy/apacheconf/sites/22-node.conf`**
+- [x] **Step 4: Create `reverse-proxy/apacheconf/sites/22-node.conf`**
 
 ```apache
 # /node/... -> node-backend (zero-dependency Node, Compose profile "node").
@@ -904,7 +904,7 @@ ProxyPass        /node/ http://node-backend:8080/ retry=0
 ProxyPassReverse /node/ http://node-backend:8080/
 ```
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 ```sh
 node --check backends/node/server.js               # syntax OK
@@ -916,7 +916,7 @@ docker compose exec node-backend id                # uid=1000(node)
 docker compose down --remove-orphans
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```
 feat(node): zero-dependency node backend served at /node/ via profile node
@@ -928,7 +928,7 @@ feat(node): zero-dependency node backend served at /node/ via profile node
 
 **Files:** Create `backends/python/{server.py,Dockerfile}`; Modify `docker-compose.yml`; Create `reverse-proxy/apacheconf/sites/23-python.conf`.
 
-- [ ] **Step 1: `backends/python/server.py`**
+- [x] **Step 1: `backends/python/server.py`**
 
 ```python
 #!/usr/bin/env python3
@@ -986,7 +986,7 @@ if __name__ == "__main__":
     ThreadingHTTPServer(("0.0.0.0", PORT), MessageHandler).serve_forever()
 ```
 
-- [ ] **Step 2: `backends/python/Dockerfile`**
+- [x] **Step 2: `backends/python/Dockerfile`**
 
 ```dockerfile
 FROM python:3.12-alpine
@@ -997,7 +997,7 @@ EXPOSE 8080
 CMD ["python3", "-u", "server.py"]
 ```
 
-- [ ] **Step 3: Append service to `docker-compose.yml`**
+- [x] **Step 3: Append service to `docker-compose.yml`**
 
 ```yaml
   python-backend:
@@ -1014,7 +1014,7 @@ CMD ["python3", "-u", "server.py"]
       start_period: 5s
 ```
 
-- [ ] **Step 4: Create `reverse-proxy/apacheconf/sites/23-python.conf`**
+- [x] **Step 4: Create `reverse-proxy/apacheconf/sites/23-python.conf`**
 
 ```apache
 # /python/... -> python-backend (stdlib-only Python, Compose profile "python").
@@ -1022,7 +1022,7 @@ ProxyPass        /python/ http://python-backend:8080/ retry=0
 ProxyPassReverse /python/ http://python-backend:8080/
 ```
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 ```sh
 python3 -m py_compile backends/python/server.py && echo SYNTAX-OK
@@ -1033,7 +1033,7 @@ curl -kfsS https://localhost:8443/python/messages | grep -q '"x_forwarded_proto"
 docker compose down --remove-orphans
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```
 feat(python): stdlib-only python backend served at /python/ via profile python
@@ -1045,7 +1045,7 @@ feat(python): stdlib-only python backend served at /python/ via profile python
 
 **Files:** Create `scripts/smoke.sh` (+ `chmod +x`).
 
-- [ ] **Step 1: Write `scripts/smoke.sh`**
+- [x] **Step 1: Write `scripts/smoke.sh`**
 
 ```sh
 #!/bin/sh
@@ -1164,7 +1164,7 @@ note "summary: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
 ```
 
-- [ ] **Step 2: Verify green path**
+- [x] **Step 2: Verify green path**
 
 ```sh
 sh -n scripts/smoke.sh && echo SYNTAX-OK
@@ -1173,7 +1173,7 @@ docker compose ps -a    # empty — teardown ran
 scripts/smoke.sh java   # 8 checks ok (4 proxy + 4 java)
 ```
 
-- [ ] **Step 3: Verify failure path** (break one expectation, confirm non-zero exit and full run, revert)
+- [x] **Step 3: Verify failure path** (break one expectation, confirm non-zero exit and full run, revert)
 
 ```sh
 sed -i '' 's/"backend":"java"/"backend":"JAVA"/' scripts/smoke.sh
@@ -1181,7 +1181,7 @@ scripts/smoke.sh java; echo "exit=$?"   # java checks FAIL, exit=1
 git checkout -- scripts/smoke.sh
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```
 test: add scripts/smoke.sh end-to-end suite
@@ -1193,7 +1193,7 @@ test: add scripts/smoke.sh end-to-end suite
 
 **Files:** Create `.github/compose.cache.yml`, `.github/workflows/ci.yml`.
 
-- [ ] **Step 1: `.github/compose.cache.yml`** (CI-only override; `type=gha` fails outside GitHub, so it is never merged locally)
+- [x] **Step 1: `.github/compose.cache.yml`** (CI-only override; `type=gha` fails outside GitHub, so it is never merged locally)
 
 ```yaml
 # CI-only Compose override: import/export build cache via GitHub Actions'
@@ -1226,7 +1226,7 @@ services:
       cache_to: ["type=gha,mode=max"]
 ```
 
-- [ ] **Step 2: `.github/workflows/ci.yml`**
+- [x] **Step 2: `.github/workflows/ci.yml`**
 
 ```yaml
 name: ci
@@ -1261,7 +1261,7 @@ jobs:
         run: scripts/smoke.sh
 ```
 
-- [ ] **Step 3: Verify locally (real run happens on push)**
+- [x] **Step 3: Verify locally (real run happens on push)**
 
 ```sh
 docker compose -f docker-compose.yml -f .github/compose.cache.yml config -q && echo OVERRIDE-MERGES-OK
@@ -1269,7 +1269,7 @@ python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml')); yaml.
 git ls-files -s scripts/ | awk '{print $1}'   # 100755 for both scripts (executable bit committed)
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```
 ci: build all profiles and run smoke.sh on push and PR
@@ -1286,10 +1286,10 @@ Content requirements (write full docs from the architecture as built; the design
 - **README.md sections:** title + one-paragraph description; architecture diagram; Quickstart (`scripts/gen-dev-certs.sh`, `docker compose --profile java up -d --build`, curls); Routes table (`GET /` landing, `/java/messages`, `/nginx/` + `/nginx/messages`, `/node/messages`, `/python/messages`, `/server-status`); note that every backend echoes `X-Forwarded-*` headers; Tests section (`scripts/smoke.sh` full/subset, CI description, Java tests inside image build); Configuration model (httpd.conf trimmed/2.4-only, `apacheconf/sites/` alphabetical includes with numeric prefixes, config+certs baked into image — rebuild after edits, TLS self-signed + no-redirect-by-design + recipe location, pinning policy proxy-patch/backends-major, healthchecks in compose); Troubleshooting (cert missing → gen script; port in use → change compose + smoke BASE_*; 502 → profile not running; cert warning → `-k`); pointer to `docs/REVIEW.md` as the historical motivation.
 - **CLAUDE.md sections:** project summary (proxy + four profile backends, prefixes, published ports only); Commands (gen certs, up with profiles, smoke full/subset, logs, down); Structure map (compose, httpd.conf + sites, backends contract, scripts, docs/REVIEW.md do-not-update); Conventions (rebuild-not-reload; adding-a-backend recipe: `backends/<name>/` + compose service block with profile + wget healthcheck + `sites/2x-<name>.conf` with `ProxyPass /<name>/ http://<name>-backend:<port>/ retry=0`, no vhost edits; 2.4 syntax only; pinning policy; conventional commits; run smoke before committing).
 
-- [ ] **Step 1: Replace `README.md`** with content covering the sections above.
-- [ ] **Step 2: Replace `CLAUDE.md`** with content covering the sections above.
-- [ ] **Step 3: Verify** — every documented command spot-checked (`docker compose config --services` matches doc; `readlink AGENTS.md` → `CLAUDE.md`); `scripts/smoke.sh java` still green.
-- [ ] **Step 4: Commit**
+- [x] **Step 1: Replace `README.md`** with content covering the sections above.
+- [x] **Step 2: Replace `CLAUDE.md`** with content covering the sections above.
+- [x] **Step 3: Verify** — every documented command spot-checked (`docker compose config --services` matches doc; `readlink AGENTS.md` → `CLAUDE.md`); `scripts/smoke.sh java` still green.
+- [x] **Step 4: Commit**
 
 ```
 docs: rewrite README and CLAUDE.md for the profile architecture
@@ -1301,13 +1301,13 @@ docs: rewrite README and CLAUDE.md for the profile architecture
 
 **Files:** Create `backends/java/.dockerignore` (`target/` only — note: `reverse-proxy/` must NOT ignore `certs/`).
 
-- [ ] **Step 1: Create `backends/java/.dockerignore`**
+- [x] **Step 1: Create `backends/java/.dockerignore`**
 
 ```
 target/
 ```
 
-- [ ] **Step 2: Dangling-reference guard**
+- [x] **Step 2: Dangling-reference guard**
 
 ```sh
 grep -rn "app-server\|testlocal\|spring-cloud-network\|httpd:latest\|openjdk\|baeldung" \
@@ -1316,7 +1316,7 @@ grep -rn "app-server\|testlocal\|spring-cloud-network\|httpd:latest\|openjdk\|ba
 
 Expected `NO-DANGLING-REFS` (docs/REVIEW.md excluded — frozen historical record).
 
-- [ ] **Step 3: Full-stack verification (all profiles simultaneously)**
+- [x] **Step 3: Full-stack verification (all profiles simultaneously)**
 
 ```sh
 docker compose --profile java --profile nginx --profile node --profile python up -d --build --wait
@@ -1331,7 +1331,7 @@ scripts/smoke.sh     # full suite green
 docker compose --profile java --profile nginx --profile node --profile python down --remove-orphans
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```
 chore: java build-context ignore, final full-stack verification
@@ -1343,8 +1343,8 @@ chore: java build-context ignore, final full-stack verification
 
 **Files:** Create `docs/plans/2026-08-25-revival-plan.md`.
 
-- [ ] **Step 1:** Copy this plan document into `docs/plans/2026-08-25-revival-plan.md` (verbatim, including design decisions).
-- [ ] **Step 2: Commit**
+- [x] **Step 1:** Copy this plan document into `docs/plans/2026-08-25-revival-plan.md` (verbatim, including design decisions).
+- [x] **Step 2: Commit**
 
 ```
 docs: add revival implementation plan
