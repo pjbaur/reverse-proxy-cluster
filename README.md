@@ -8,6 +8,8 @@ exactly the backends you want and reach all of them through the same proxy by
 URL prefix (`/java/`, `/nginx/`, `/node/`, `/python/`). A fifth profile,
 `balanced`, puts three replicas of the node backend behind Apache's own load
 balancer at `/balanced/` — see [Load-balancing demo](#load-balancing-demo).
+A sixth profile, `failover`, pairs an active primary with a hot standby at
+`/failover/` — see [Failover demo](#failover-demo).
 
 ## Architecture
 
@@ -21,11 +23,15 @@ client ──▶ :8443 (https) ─┘   │  TLS terminated here, self-signed de
                               ├─▶ /nginx/  ──▶ nginx-backend  :80    (profile nginx)
                               ├─▶ /node/   ──▶ node-backend   :8080  (profile node)
                               ├─▶ /python/ ──▶ python-backend :8080  (profile python)
-                              └─▶ /balanced/ ─▶ balancer://demo  (profile balanced)
-                                                byrequests round-robin:
-                                                ├─▶ node-backend-1 :8080
-                                                ├─▶ node-backend-2 :8080
-                                                └─▶ node-backend-3 :8080
+                              ├─▶ /balanced/ ─▶ balancer://demo  (profile balanced)
+                              │                 byrequests round-robin:
+                              │                 ├─▶ node-backend-1 :8080
+                              │                 ├─▶ node-backend-2 :8080
+                              │                 └─▶ node-backend-3 :8080
+                              └─▶ /failover/ ─▶ balancer://failover (profile failover)
+                                                hot standby (status=+H):
+                                                ├─▶ node-backend-primary :8080  ◀─ serves all
+                                                └─▶ node-backend-standby :8080  ◀─ on error only
 ```
 
 | Service         | Image                                     | Profile  | Published ports | Route       |
@@ -36,6 +42,7 @@ client ──▶ :8443 (https) ─┘   │  TLS terminated here, self-signed de
 | node-backend    | `node:22-alpine`                          | `node`   | none            | `/node/`    |
 | python-backend  | `python:3.12-alpine`                      | `python` | none            | `/python/`  |
 | node-backend-1 … 3 | `node:22-alpine` (same build as `node-backend`) | `balanced` | none      | `/balanced/` (via `balancer://demo`) |
+| node-backend-primary, node-backend-standby | `node:22-alpine` (same build as `node-backend`) | `failover` | none | `/failover/` (via `balancer://failover`) |
 
 All services attach to the `proxy-net` bridge network; the proxy reaches each
 backend by its Compose service name (`http://java-backend:8080` and so on).
@@ -58,10 +65,10 @@ curl http://localhost:8080/java/messages       # proxied to the Spring Boot back
 curl -k https://localhost:8443/java/messages   # same route over TLS
 ```
 
-To run every backend, list all five profiles:
+To run every backend, list all six profiles:
 
 ```sh
-docker compose --profile java --profile nginx --profile node --profile python --profile balanced up -d --build
+docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover up -d --build
 ```
 
 Teardown — pass the same `--profile` flags you used to start:
@@ -81,6 +88,7 @@ docker compose --profile java down
 | `GET /node/messages`| node-backend   | `node`        | JSON; echoes `X-Forwarded-*` headers        |
 | `GET /python/messages` | python-backend | `python`   | JSON; echoes `X-Forwarded-*` headers        |
 | `GET /balanced/messages` | `balancer://demo` | `balanced` | JSON; `host` names the replica that answered |
+| `GET /failover/messages` | `balancer://failover` | `failover` | JSON; `host` is `node-backend-primary`, or `-standby` while it is down |
 | `GET /balancer-manager` | reverse-proxy | —             | `mod_proxy_balancer` dashboard              |
 | `GET /server-status` | reverse-proxy | —             | Apache `mod_status` page                    |
 | any other path      | reverse-proxy  | —             | 404                                         |
@@ -143,6 +151,41 @@ The page is guarded twice: the same loopback + RFC 1918 source restriction as
 unless the `Referer` names the same host — browsers send that automatically,
 a scripted `curl` must add `-H "Referer: http://localhost:8080/…"`.
 
+## Failover demo
+
+The `failover` profile adds a hot-standby pair: the node backend twice
+(`node-backend-primary` + `node-backend-standby`) behind
+`balancer://failover` in `reverse-proxy/apacheconf/sites/25-failover.conf`.
+The primary serves everything; the standby — marked `status=+H` — only
+answers while the primary is in error state. The primary carries
+`retry=5`, not the project's usual `retry=0`: hot standby engages through
+the worker error state, which `retry=0` would wipe instantly (every
+request would re-elect the dead primary and 503). The bounded 5 s window
+activates the standby the moment the primary fails and re-elects the
+primary within 5 s of it returning:
+
+```sh
+docker compose --profile failover up -d --build
+
+# every request answers from the primary
+curl -s http://localhost:8080/failover/messages | grep -o '"host":"[^"]*"'
+
+# kill the primary — the same requests now answer from the standby
+docker compose --profile failover stop node-backend-primary
+curl -s http://localhost:8080/failover/messages | grep -o '"host":"[^"]*"'
+
+# restart the primary — traffic returns on the next request
+docker compose --profile failover up -d --wait node-backend-primary
+curl -s http://localhost:8080/failover/messages | grep -o '"host":"[^"]*"'
+
+curl -k https://localhost:8443/failover/messages   # same route over TLS
+docker compose --profile failover down
+```
+
+`/balancer-manager` lists both balancers; the standby's status column reads
+`Stby` (the `status=+H` flag, shown only on the standby) and its `Elected`
+count stays `0` until the failover.
+
 ## Tests
 
 `scripts/smoke.sh` is the test suite. It builds the stack, starts the
@@ -151,7 +194,7 @@ each route, then tears the stack down again. All checks run even if an earlier
 one failed, and any failure exits non-zero:
 
 ```sh
-scripts/smoke.sh               # all five profiles — 22 checks
+scripts/smoke.sh               # all six profiles — 27 checks
 scripts/smoke.sh java node     # any subset
 ```
 
@@ -160,9 +203,9 @@ is missing, so it is also the one-command verification of a fresh clone.
 
 CI (`.github/workflows/ci.yml`) runs a single job on every push to `master`
 and on pull requests: set up buildx, generate the certificate, build five
-distinct images — the `balanced` replicas are three services sharing the
-single node image — with GitHub Actions layer caching (merged from
-`.github/compose.cache.yml`), then run `scripts/smoke.sh`.
+distinct images — the `balanced` replicas and the `failover` pair are five
+services sharing the single node image — with GitHub Actions layer caching
+(merged from `.github/compose.cache.yml`), then run `scripts/smoke.sh`.
 
 The Java backend additionally has `@WebMvcTest` unit tests
 (`backends/java/src/test/`). Its image build runs `mvn package` without
@@ -189,6 +232,13 @@ The Java backend additionally has `@WebMvcTest` unit tests
     lines, not on the balancer `ProxyPass` — with a `balancer://` target,
     key=value parameters are balancer parameters and httpd rejects worker
     parameters there.
+  - `25-failover.conf` — the hot-standby pair: `<Proxy "balancer://failover">`
+    with `node-backend-primary` (`retry=5`) and `node-backend-standby`
+    (`retry=0 status=+H`) and the `/failover/` `ProxyPass`/`ProxyPassReverse`
+    pair. The primary's `retry=5` is deliberate: hot standby engages through
+    the worker error state, which `retry=0` would wipe (standby never
+    activates). Same worker-parameters rule as 24: worker parameters live on
+    the `BalancerMember` lines, not the balancer `ProxyPass`.
   - `90-ssl.conf` — the only `<VirtualHost>` (`*:443`). Everything else is
     server-level config that port 80 serves directly and the vhost inherits,
     so both listeners behave identically. The `SSLSessionCache` directives
@@ -209,7 +259,8 @@ The Java backend additionally has `@WebMvcTest` unit tests
   (`nginx:1.30-alpine`, `node:22-alpine`, `python:3.12-alpine`, Temurin 21).
 - Healthchecks are defined once in `docker-compose.yml` using the `wget`
   built into every Alpine image (busybox). `nginx-backend`, `python-backend`,
-  and the three balanced replicas (`node-backend-1/2/3`) probe
+  and the three balanced replicas (`node-backend-1/2/3`) and the failover
+  pair (`node-backend-primary`/`node-backend-standby`) probe
   `http://127.0.0.1/...` because their listeners are IPv4-only while busybox
   `wget` resolves `localhost` to `::1` first; `reverse-proxy` and
   `java-backend` use `localhost`. Every service sets

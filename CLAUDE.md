@@ -18,6 +18,7 @@ the proxy by URL prefix:
 | `/node/`  | node-backend    | `node`   | zero-dependency `node:http`  |
 | `/python/`| python-backend  | `python` | stdlib `http.server`         |
 | `/balanced/` | `balancer://demo` → node-backend-1/2/3 | `balanced` | 3× node replicas behind `mod_proxy_balancer` |
+| `/failover/` | `balancer://failover` → node-backend-primary/standby | `failover` | 2× node: hot standby (`status=+H`) |
 
 The test suite is `scripts/smoke.sh`; the Java unit tests run inside the
 `java-backend` image build. See README.md for the full architecture.
@@ -31,10 +32,11 @@ scripts/gen-dev-certs.sh
 # Start the proxy plus one backend, every backend, or the load-balancing
 # demo (3 node replicas behind mod_proxy_balancer)
 docker compose --profile java up -d --build
-docker compose --profile java --profile nginx --profile node --profile python --profile balanced up -d --build
+docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover up -d --build
 docker compose --profile balanced up -d --build
+docker compose --profile failover up -d --build   # hot-standby failover demo
 
-# Test suite — all profiles (22 checks) or any subset
+# Test suite — all profiles (27 checks) or any subset
 scripts/smoke.sh
 scripts/smoke.sh java node
 
@@ -49,9 +51,10 @@ docker compose --profile balanced down
 
 ## Structure
 
-- `docker-compose.yml` — all eight services (proxy, four single backends,
-  three `balanced` replicas), the `proxy-net` network, published
-  ports, and the single source of truth for healthchecks (busybox `wget`).
+- `docker-compose.yml` — all ten services (proxy, four single backends,
+  three `balanced` replicas, the `failover` primary/standby pair), the
+  `proxy-net` network, published ports, and the single source of truth for
+  healthchecks (busybox `wget`).
 - `reverse-proxy/Dockerfile` — patch-pinned base image; bakes in `httpd.conf`,
   `apacheconf/sites/`, the landing page and the dev certificate.
 - `reverse-proxy/httpd.conf` — trimmed, 2.4-only base config (17 modules);
@@ -61,6 +64,8 @@ docker compose --profile balanced down
   (`ProxyRequests Off`, `X-Forwarded-Proto`/`Port`), `20`–`23` one file per
   backend route, `24-balanced.conf` (`balancer://demo` round-robin over
   node-backend-1/2/3 plus the `/balancer-manager` dashboard),
+  `25-failover.conf` (`balancer://failover` hot standby:
+  `node-backend-primary` + `node-backend-standby` with `status=+H`),
   `90-ssl.conf` (the only `<VirtualHost *:443>`; inherits all
   server-level routing).
 - `backends/<name>/` — one self-contained directory per backend (Dockerfile +
@@ -122,6 +127,13 @@ docker compose --profile balanced down
   That is why the demo has three explicit services (`node-backend-1/2/3`)
   in `24-balanced.conf` — grow the balancer by adding a service plus a
   `BalancerMember` line, never by scaling.
+- **Hot standby needs `status=+H`, `hostname:`, and a real error window.**
+  Mark the spare `status=+H` so it serves only when the primary is in error
+  state, give both services explicit `hostname:` keys (the JSON `host` field
+  is the container hostname — a missing key shows the container ID), and keep
+  the primary's retry small but nonzero (`retry=5`) — the error window is
+  what activates the standby (`retry=0` wipes it; the standby never engages)
+  and it expires fast enough that recovery feels instant.
 - **Module set stays explicit.** `httpd.conf` loads 17 modules by design;
   a new feature adds its own `LoadModule` lines (the balancer cost three:
   `mod_slotmem_shm`, `mod_proxy_balancer`, `mod_lbmethod_byrequests`).
