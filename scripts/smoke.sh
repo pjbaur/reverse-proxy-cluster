@@ -1,7 +1,7 @@
 #!/bin/sh
 # scripts/smoke.sh — the project's test suite.
 #
-# Builds the stack, starts the requested Compose profiles (default: all five),
+# Builds the stack, starts the requested Compose profiles (default: all six),
 # waits until every container reports healthy, then exercises every route and
 # tears the stack down again. All checks run even if one fails (so a single
 # failure doesn't hide others); any failure exits non-zero.
@@ -17,7 +17,7 @@ cd "$ROOT"
 if [ "$#" -gt 0 ]; then
   PROFILES="$*"
 else
-  PROFILES="java nginx node python balanced"
+  PROFILES="java nginx node python balanced failover"
 fi
 
 PROFILE_ARGS=""
@@ -69,6 +69,28 @@ check_rotates() {
     ok "$name"
   else
     failed "$name - only $distinct distinct hosts (wanted >= $min) from $url"
+  fi
+}
+
+# check_host_exact <name> <url> <expected-host> — fetches 6 times; every
+# response's "host" must equal expected-host. Failover is deterministic
+# (unlike rotation), so any deviation is a failure.
+check_host_exact() {
+  name="$1"; url="$2"; want="$3"
+  i=0; bad=0; empty=0
+  while [ "$i" -lt 6 ]; do
+    h="$(curl -fsS "$url" 2>/dev/null | sed -n 's/.*"host":"\([^"]*\)".*/\1/p')" || h=""
+    if [ -z "$h" ]; then
+      empty=$((empty + 1))
+    elif [ "$h" != "$want" ]; then
+      bad=$((bad + 1))
+    fi
+    i=$((i + 1))
+  done
+  if [ "$bad" -eq 0 ] && [ "$empty" -eq 0 ]; then
+    ok "$name"
+  else
+    failed "$name - $bad wrong, $empty failed responses (wanted all '$want') from $url"
   fi
 }
 
@@ -128,6 +150,23 @@ for profile in $PROFILES; do
       check "balanced: /balanced/messages over https"     "$BASE_HTTPS/balanced/messages"  '"backend":"node"' -k
       check_rotates "balanced: host rotation (>=2 of 3)"  "$BASE_HTTP/balanced/messages"   2
       check "balanced: balancer-manager dashboard"        "$BASE_HTTP/balancer-manager"    "Load Balancer Manager"
+      ;;
+    failover)
+      check "failover: /failover/messages"            "$BASE_HTTP/failover/messages"   '"backend":"node"'
+      check "failover: /failover/messages over https" "$BASE_HTTPS/failover/messages"  '"backend":"node"' -k
+      check_host_exact "failover: primary serves all"  "$BASE_HTTP/failover/messages"  node-backend-primary
+      # shellcheck disable=SC2086
+      if docker compose $PROFILE_ARGS stop node-backend-primary >/dev/null 2>&1; then
+        check_host_exact "failover: standby takes over" "$BASE_HTTP/failover/messages" node-backend-standby
+        # shellcheck disable=SC2086
+        if docker compose $PROFILE_ARGS up -d --wait --wait-timeout 60 node-backend-primary >/dev/null 2>&1; then
+          check_host_exact "failover: primary recovers" "$BASE_HTTP/failover/messages" node-backend-primary
+        else
+          failed "failover: primary did not come back healthy after restart"
+        fi
+      else
+        failed "failover: could not stop node-backend-primary"
+      fi
       ;;
     *)
       printf 'unknown profile: %s\n' "$profile" >&2
