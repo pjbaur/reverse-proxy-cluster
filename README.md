@@ -178,7 +178,7 @@ docker compose --profile failover up -d --build
 # every request answers from the primary
 curl -s http://localhost:8080/failover/messages | grep -o '"host":"[^"]*"'
 
-# kill the primary — the same requests now answer from the standby
+# kill the primary — from the second request on, the standby answers
 docker compose --profile failover stop node-backend-primary
 curl -s http://localhost:8080/failover/messages | grep -o '"host":"[^"]*"'
 
@@ -189,6 +189,15 @@ curl -s http://localhost:8080/failover/messages | grep -o '"host":"[^"]*"'
 curl -k https://localhost:8443/failover/messages   # same route over TLS
 docker compose --profile failover down
 ```
+
+The first request after the stop is the transition itself and is
+nondeterministic: Compose removes the stopped container's DNS entry, so
+the balancer either answers 500 (DNS lookup failure, no in-request
+deferral) or blocks on the dead address for up to Apache's 60 s `Timeout`
+before retrying on the standby. Either outcome puts the primary worker
+into error state, and every request from the second onward is served by
+the standby; the smoke suite warms the transition request through before
+asserting the steady state.
 
 `/balancer-manager` lists both balancers; the standby's status column reads
 `Stby` (the `status=+H` flag, shown only on the standby) and its `Elected`

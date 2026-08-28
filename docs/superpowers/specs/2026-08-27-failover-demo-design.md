@@ -178,3 +178,18 @@ entries sharing the existing `scope=node-backend` (same build context).
 `ProxySet failover=on` contrast, active health probes (`mod_proxy_hcheck`), sticky
 sessions, `bybusyness`, standby for non-node backends, and more members. The
 balanced demo's deferred items (sticky sessions, `bybusyness`) remain queued.
+
+## Addendum (2026-08-28): measured transition behavior
+
+The design assumed a failed worker defers to the hot standby on the same
+request. Measured after merge, that holds only for connection failures:
+`docker compose stop` also removes the container's DNS entry, and the
+balancer's first post-stop request then either fails with a DNS lookup
+error (AH00898, returned to the client as 500, no in-request deferral) or
+blocks on the dead address until the ~60 s `Timeout` before the in-request
+retry reaches the standby. Either way the primary worker enters error
+state on that attempt, and the standby serves every request from the
+second onward (`retry=5` keeps the error window). The smoke check warms
+the transition request through (`curl --max-time 70`, unasserted) and
+then asserts the steady state over six requests; the same note is in the
+README's failover section.

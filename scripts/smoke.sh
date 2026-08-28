@@ -187,6 +187,15 @@ for profile in $PROFILES; do
       check_host_exact "failover: primary serves all"  "$BASE_HTTP/failover/messages"  node-backend-primary
       # shellcheck disable=SC2086
       if docker compose $PROFILE_ARGS stop node-backend-primary >/dev/null 2>&1; then
+        # The first request after the stop is the transition itself and is
+        # nondeterministic: compose removes the stopped container's DNS
+        # entry, so the balancer either eats a DNS lookup failure (AH00898,
+        # 500 to the client, no in-request deferral) or blocks on the dead
+        # address until the ~60 s Timeout before retrying on the standby.
+        # Either outcome puts the primary worker into error state; the
+        # standby defers reliably from the *second* request. Warm the
+        # transition through, then assert the steady state.
+        curl -fsS --max-time 70 "$BASE_HTTP/failover/messages" >/dev/null 2>&1 || true
         check_host_exact "failover: standby takes over" "$BASE_HTTP/failover/messages" node-backend-standby
         # --wait outlasts the primary's 5 s retry window (the healthcheck
         # interval alone is 10 s), so the primary is re-elected right away.
