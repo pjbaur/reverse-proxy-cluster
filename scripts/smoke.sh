@@ -124,7 +124,9 @@ cleanup() {
   note "tearing down"
   # shellcheck disable=SC2086
   docker compose $PROFILE_ARGS down --remove-orphans --timeout 5 >/dev/null 2>&1 || true
-  [ -n "${STICKY_DIR:-}" ] && rm -rf "$STICKY_DIR"
+  if [ -n "${STICKY_DIR:-}" ]; then
+    rm -rf "$STICKY_DIR"
+  fi
 }
 trap cleanup EXIT INT TERM
 

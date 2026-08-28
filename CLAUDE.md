@@ -53,10 +53,10 @@ docker compose --profile balanced down
 
 ## Structure
 
-- `docker-compose.yml` — all ten services (proxy, four single backends,
-  three `balanced` replicas, the `failover` primary/standby pair), the
-  `proxy-net` network, published ports, and the single source of truth for
-  healthchecks (busybox `wget`).
+- `docker-compose.yml` — all twelve services (proxy, four single backends,
+  three `balanced` replicas, the `failover` primary/standby pair, the
+  `sticky` pair), the `proxy-net` network, published ports, and the single
+  source of truth for healthchecks (busybox `wget`).
 - `reverse-proxy/Dockerfile` — patch-pinned base image; bakes in `httpd.conf`,
   `apacheconf/sites/`, the landing page and the dev certificate.
 - `reverse-proxy/httpd.conf` — trimmed, 2.4-only base config (17 modules);
