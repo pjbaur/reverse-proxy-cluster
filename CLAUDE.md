@@ -29,8 +29,8 @@ The test suite is `scripts/smoke.sh`; the Java unit tests run inside the
 # Generate the dev TLS certificate (required before the proxy image builds)
 scripts/gen-dev-certs.sh
 
-# Start the proxy plus one backend, every backend, or the load-balancing
-# demo (3 node replicas behind mod_proxy_balancer)
+# Start the proxy plus one backend, every backend, or one of the demos
+# (balanced: 3 node replicas; failover: hot-standby pair)
 docker compose --profile java up -d --build
 docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover up -d --build
 docker compose --profile balanced up -d --build

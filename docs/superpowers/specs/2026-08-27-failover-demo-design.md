@@ -115,7 +115,7 @@ healthcheck turns healthy). Same sequence works over `https://localhost:8443`;
 next to `check_rotates`:
 
 ```sh
-# check_host_exact <name> <url> <expected-host> [count] — fetches count times,
+# check_host_exact <name> <url> <expected-host> — fetches 6 times,
 # every response's "host" must equal expected-host (failover is deterministic,
 # unlike rotation).
 ```

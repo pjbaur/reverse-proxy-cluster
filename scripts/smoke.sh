@@ -158,6 +158,9 @@ for profile in $PROFILES; do
       # shellcheck disable=SC2086
       if docker compose $PROFILE_ARGS stop node-backend-primary >/dev/null 2>&1; then
         check_host_exact "failover: standby takes over" "$BASE_HTTP/failover/messages" node-backend-standby
+        # --wait outlasts the primary's 5 s retry window (the healthcheck
+        # interval alone is 10 s), so the primary is re-elected right away.
+        # Keep it that way if the healthcheck interval is ever lowered.
         # shellcheck disable=SC2086
         if docker compose $PROFILE_ARGS up -d --wait --wait-timeout 60 node-backend-primary >/dev/null 2>&1; then
           check_host_exact "failover: primary recovers" "$BASE_HTTP/failover/messages" node-backend-primary
