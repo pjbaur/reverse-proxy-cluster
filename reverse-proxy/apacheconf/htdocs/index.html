@@ -21,6 +21,7 @@
     <li><code>GET /python/messages</code> — Python (<code>--profile python</code>)</li>
     <li><code>GET /balanced/messages</code> — load-balanced across 3 node replicas (<code>--profile balanced</code>)</li>
     <li><code>GET /failover/messages</code> — hot standby: primary serves, standby takes over when it stops (<code>--profile failover</code>)</li>
+    <li><code>GET /sticky/messages</code> — session affinity: one member per client cookie, round-robin without (<code>--profile sticky</code>)</li>
     <li><code>GET /balancer-manager</code> — balancer dashboard (private ranges only, <code>--profile balanced</code>)</li>
   </ul>
   <p>Also served: this page over HTTPS at <code>https://localhost:8443/</code>

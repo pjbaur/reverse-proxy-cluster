@@ -10,6 +10,8 @@ URL prefix (`/java/`, `/nginx/`, `/node/`, `/python/`). A fifth profile,
 balancer at `/balanced/` — see [Load-balancing demo](#load-balancing-demo).
 A sixth profile, `failover`, pairs an active primary with a hot standby at
 `/failover/` — see [Failover demo](#failover-demo).
+A seventh profile, `sticky`, pins each client to one member via a session
+cookie at `/sticky/` — see [Sticky sessions demo](#sticky-sessions-demo).
 
 ## Architecture
 
@@ -28,10 +30,14 @@ client ──▶ :8443 (https) ─┘   │  TLS terminated here, self-signed de
                               │                 ├─▶ node-backend-1 :8080
                               │                 ├─▶ node-backend-2 :8080
                               │                 └─▶ node-backend-3 :8080
-                              └─▶ /failover/ ─▶ balancer://failover (profile failover)
-                                                hot standby (status=+H):
-                                                ├─▶ node-backend-primary :8080  ◀─ serves all
-                                                └─▶ node-backend-standby :8080  ◀─ on error only
+                              ├─▶ /failover/ ─▶ balancer://failover (profile failover)
+                              │                 hot standby (status=+H):
+                              │                 ├─▶ node-backend-primary :8080  ◀─ serves all
+                              │                 └─▶ node-backend-standby :8080  ◀─ on error only
+                              └─▶ /sticky/  ─▶ balancer://sticky  (profile sticky)
+                                                session affinity (stickysession=SESSIONID):
+                                                ├─▶ node-backend-sticky-1 :8080  ◀─ cookie suffix .node-backend-sticky-1
+                                                └─▶ node-backend-sticky-2 :8080  ◀─ cookie suffix .node-backend-sticky-2
 ```
 
 | Service         | Image                                     | Profile  | Published ports | Route       |
@@ -43,6 +49,7 @@ client ──▶ :8443 (https) ─┘   │  TLS terminated here, self-signed de
 | python-backend  | `python:3.12-alpine`                      | `python` | none            | `/python/`  |
 | node-backend-1 … 3 | `node:22-alpine` (same build as `node-backend`) | `balanced` | none      | `/balanced/` (via `balancer://demo`) |
 | node-backend-primary, node-backend-standby | `node:22-alpine` (same build as `node-backend`) | `failover` | none | `/failover/` (via `balancer://failover`) |
+| node-backend-sticky-1, node-backend-sticky-2 | `node:22-alpine` (same build as `node-backend`) | `sticky` | none | `/sticky/` (via `balancer://sticky`) |
 
 All services attach to the `proxy-net` bridge network; the proxy reaches each
 backend by its Compose service name (`http://java-backend:8080` and so on).
@@ -65,10 +72,10 @@ curl http://localhost:8080/java/messages       # proxied to the Spring Boot back
 curl -k https://localhost:8443/java/messages   # same route over TLS
 ```
 
-To run every backend, list all six profiles:
+To run every backend, list all seven profiles:
 
 ```sh
-docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover up -d --build
+docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover --profile sticky up -d --build
 ```
 
 Teardown — pass the same `--profile` flags you used to start:
@@ -89,6 +96,7 @@ docker compose --profile java down
 | `GET /python/messages` | python-backend | `python`   | JSON; echoes `X-Forwarded-*` headers        |
 | `GET /balanced/messages` | `balancer://demo` | `balanced` | JSON; `host` names the replica that answered |
 | `GET /failover/messages` | `balancer://failover` | `failover` | JSON; `host` is `node-backend-primary`, or `-standby` while it is down |
+| `GET /sticky/messages` | `balancer://sticky` | `sticky` | JSON; `host` is constant per client cookie, alternating without one |
 | `GET /balancer-manager` | reverse-proxy | —             | `mod_proxy_balancer` dashboard              |
 | `GET /server-status` | reverse-proxy | —             | Apache `mod_status` page                    |
 | any other path      | reverse-proxy  | —             | 404                                         |
@@ -186,6 +194,49 @@ docker compose --profile failover down
 `Stby` (the `status=+H` flag, shown only on the standby) and its `Elected`
 count stays `0` until the failover.
 
+## Sticky sessions demo
+
+The `sticky` profile adds session affinity: the node backend twice
+(`node-backend-sticky-1` + `node-backend-sticky-2`) behind
+`balancer://sticky` in `reverse-proxy/apacheconf/sites/26-sticky.conf`.
+Each service exports `ROUTE=<its own name>`, and the node app bakes that
+route into its session cookie — `Set-Cookie: SESSIONID=<uuid>.<ROUTE>` —
+jvmRoute-style, exactly how a Tomcat worker embeds its route in
+`JSESSIONID`. The balancer (`ProxySet stickysession=SESSIONID`) reads the
+cookie, splits the value on the first `.`, and sends the client to the
+member whose `route=` matches the suffix. Clients without the cookie fall
+through to plain round-robin:
+
+```sh
+docker compose --profile sticky up -d --build
+
+# cookie-less: the members alternate (plain byrequests round-robin)
+for i in 1 2 3 4; do
+  curl -s http://localhost:8080/sticky/messages | grep -o '"host":"[^"]*"'
+done
+
+# cookie-jar client: pinned to one member on every request
+for i in 1 2 3 4; do
+  curl -s -c jar.txt -b jar.txt http://localhost:8080/sticky/messages | grep -o '"host":"[^"]*"'
+done
+grep -o 'node-backend-sticky-[12]' jar.txt | sort -u   # the one member this jar is pinned to
+
+curl -v http://localhost:8080/sticky/messages 2>&1 | grep -i set-cookie
+# Set-Cookie: SESSIONID=<uuid>.node-backend-sticky-1   <- the route suffix
+
+curl -k https://localhost:8443/sticky/messages   # same route over TLS
+docker compose --profile sticky down
+```
+
+A second jar (`-c jar2.txt -b jar2.txt`) pins independently — it may land
+on either member, but it stays there: affinity is per client, not global.
+`/balancer-manager` lists the `sticky` balancer with each member's route
+in its URL column.
+
+If the cookie name, the `.` suffix, or the route/`ROUTE`/service-name
+triple ever drifts, stickiness degrades silently to round-robin — no
+error, just rotation. The smoke suite's pinning checks are the guard.
+
 ## Tests
 
 `scripts/smoke.sh` is the test suite. It builds the stack, starts the
@@ -194,7 +245,7 @@ each route, then tears the stack down again. All checks run even if an earlier
 one failed, and any failure exits non-zero:
 
 ```sh
-scripts/smoke.sh               # all six profiles — 27 checks
+scripts/smoke.sh               # all seven profiles — 32 checks
 scripts/smoke.sh java node     # any subset
 ```
 
@@ -203,9 +254,10 @@ is missing, so it is also the one-command verification of a fresh clone.
 
 CI (`.github/workflows/ci.yml`) runs a single job on every push to `master`
 and on pull requests: set up buildx, generate the certificate, build five
-distinct images — the `balanced` replicas and the `failover` pair are five
-services sharing the single node image — with GitHub Actions layer caching
-(merged from `.github/compose.cache.yml`), then run `scripts/smoke.sh`.
+distinct images — the `balanced` replicas, the `failover` pair and the
+`sticky` pair are seven services sharing the single node image — with
+GitHub Actions layer caching (merged from `.github/compose.cache.yml`),
+then run `scripts/smoke.sh`.
 
 The Java backend additionally has `@WebMvcTest` unit tests
 (`backends/java/src/test/`). Its image build runs `mvn package` without
@@ -239,6 +291,13 @@ The Java backend additionally has `@WebMvcTest` unit tests
     the worker error state, which `retry=0` would wipe (standby never
     activates). Same worker-parameters rule as 24: worker parameters live on
     the `BalancerMember` lines, not the balancer `ProxyPass`.
+  - `26-sticky.conf` — session affinity: `<Proxy "balancer://sticky">` with
+    two `BalancerMember` lines carrying `route=node-backend-sticky-1/2`
+    (each matching that service's `ROUTE` env var and `hostname:`), plus
+    `ProxySet stickysession=SESSIONID` — the balancer routes by the
+    `.`-suffix of the client's `SESSIONID` cookie. Same worker-parameters
+    rule as 24: worker parameters live on the `BalancerMember` lines, not
+    the balancer `ProxyPass`.
   - `90-ssl.conf` — the only `<VirtualHost>` (`*:443`). Everything else is
     server-level config that port 80 serves directly and the vhost inherits,
     so both listeners behave identically. The `SSLSessionCache` directives
@@ -259,12 +318,12 @@ The Java backend additionally has `@WebMvcTest` unit tests
   (`nginx:1.30-alpine`, `node:22-alpine`, `python:3.12-alpine`, Temurin 21).
 - Healthchecks are defined once in `docker-compose.yml` using the `wget`
   built into every Alpine image (busybox). `nginx-backend`, `python-backend`,
-  and the three balanced replicas (`node-backend-1/2/3`) and the failover
-  pair (`node-backend-primary`/`node-backend-standby`) probe
-  `http://127.0.0.1/...` because their listeners are IPv4-only while busybox
-  `wget` resolves `localhost` to `::1` first; `reverse-proxy` and
-  `java-backend` use `localhost`. Every service sets
-  `restart: unless-stopped`.
+  and the three balanced replicas (`node-backend-1/2/3`), the failover
+  pair (`node-backend-primary`/`node-backend-standby`) and the sticky
+  pair (`node-backend-sticky-1`/`-2`) probe `http://127.0.0.1/...` because
+  their listeners are IPv4-only while busybox `wget` resolves `localhost`
+  to `::1` first; `reverse-proxy` and `java-backend` use `localhost`. Every
+  service sets `restart: unless-stopped`.
 
 ## Troubleshooting
 

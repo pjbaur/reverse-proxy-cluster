@@ -19,6 +19,7 @@ the proxy by URL prefix:
 | `/python/`| python-backend  | `python` | stdlib `http.server`         |
 | `/balanced/` | `balancer://demo` → node-backend-1/2/3 | `balanced` | 3× node replicas behind `mod_proxy_balancer` |
 | `/failover/` | `balancer://failover` → node-backend-primary/standby | `failover` | 2× node: hot standby (`status=+H`) |
+| `/sticky/` | `balancer://sticky` → node-backend-sticky-1/2 | `sticky` | 2× node: session affinity (`stickysession`) |
 
 The test suite is `scripts/smoke.sh`; the Java unit tests run inside the
 `java-backend` image build. See README.md for the full architecture.
@@ -32,11 +33,12 @@ scripts/gen-dev-certs.sh
 # Start the proxy plus one backend, every backend, or one of the demos
 # (balanced: 3 node replicas; failover: hot-standby pair)
 docker compose --profile java up -d --build
-docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover up -d --build
+docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover --profile sticky up -d --build
 docker compose --profile balanced up -d --build
 docker compose --profile failover up -d --build   # hot-standby failover demo
+docker compose --profile sticky up -d --build    # session-affinity (sticky) demo
 
-# Test suite — all profiles (27 checks) or any subset
+# Test suite — all profiles (32 checks) or any subset
 scripts/smoke.sh
 scripts/smoke.sh java node
 
@@ -66,6 +68,8 @@ docker compose --profile balanced down
   node-backend-1/2/3 plus the `/balancer-manager` dashboard),
   `25-failover.conf` (`balancer://failover` hot standby:
   `node-backend-primary` + `node-backend-standby` with `status=+H`),
+  `26-sticky.conf` (`balancer://sticky` session affinity:
+  `node-backend-sticky-1/2` with `route=` + `stickysession=SESSIONID`),
   `90-ssl.conf` (the only `<VirtualHost *:443>`; inherits all
   server-level routing).
 - `backends/<name>/` — one self-contained directory per backend (Dockerfile +
@@ -134,6 +138,13 @@ docker compose --profile balanced down
   the primary's retry small but nonzero (`retry=5`) — the error window is
   what activates the standby (`retry=0` wipes it; the standby never engages)
   and it expires fast enough that recovery feels instant.
+- **Sticky routes need the route string in four places.** The member's
+  `route=` param, the service's `ROUTE` env var (the node app bakes it
+  into the `SESSIONID` cookie suffix, jvmRoute-style), the service name,
+  and its `hostname:` key must all be identical, and the cookie name must
+  match `stickysession=`. Any drift degrades stickiness silently to
+  round-robin — no error, just rotation; the smoke pinning checks are the
+  only guard.
 - **Module set stays explicit.** `httpd.conf` loads 17 modules by design;
   a new feature adds its own `LoadModule` lines (the balancer cost three:
   `mod_slotmem_shm`, `mod_proxy_balancer`, `mod_lbmethod_byrequests`).
