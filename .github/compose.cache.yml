@@ -51,3 +51,13 @@ services:
       context: ./backends/node
       cache_from: ["type=gha,scope=node-backend"]
       cache_to: ["type=gha,mode=max,scope=node-backend"]
+  node-backend-sticky-1:
+    build:
+      context: ./backends/node
+      cache_from: ["type=gha,scope=node-backend"]
+      cache_to: ["type=gha,mode=max,scope=node-backend"]
+  node-backend-sticky-2:
+    build:
+      context: ./backends/node
+      cache_from: ["type=gha,scope=node-backend"]
+      cache_to: ["type=gha,mode=max,scope=node-backend"]

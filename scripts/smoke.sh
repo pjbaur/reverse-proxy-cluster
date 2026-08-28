@@ -1,7 +1,7 @@
 #!/bin/sh
 # scripts/smoke.sh — the project's test suite.
 #
-# Builds the stack, starts the requested Compose profiles (default: all six),
+# Builds the stack, starts the requested Compose profiles (default: all seven),
 # waits until every container reports healthy, then exercises every route and
 # tears the stack down again. All checks run even if one fails (so a single
 # failure doesn't hide others); any failure exits non-zero.
@@ -17,7 +17,7 @@ cd "$ROOT"
 if [ "$#" -gt 0 ]; then
   PROFILES="$*"
 else
-  PROFILES="java nginx node python balanced failover"
+  PROFILES="java nginx node python balanced failover sticky"
 fi
 
 PROFILE_ARGS=""
@@ -94,10 +94,37 @@ check_host_exact() {
   fi
 }
 
+# check_host_constant <name> <url> <jar> — fetches 6 times through a curl
+# cookie jar; every response's "host" must be the same value (stickiness
+# pins a client to one member; which member is not deterministic under
+# byrequests, so constancy is the assertion, not identity).
+check_host_constant() {
+  name="$1"; url="$2"; jar="$3"
+  first=""
+  i=0; bad=0; empty=0
+  while [ "$i" -lt 6 ]; do
+    h="$(curl -fsS -b "$jar" -c "$jar" "$url" 2>/dev/null | sed -n 's/.*"host":"\([^"]*\)".*/\1/p')" || h=""
+    if [ -z "$h" ]; then
+      empty=$((empty + 1))
+    elif [ -z "$first" ]; then
+      first="$h"
+    elif [ "$h" != "$first" ]; then
+      bad=$((bad + 1))
+    fi
+    i=$((i + 1))
+  done
+  if [ "$bad" -eq 0 ] && [ "$empty" -eq 0 ]; then
+    ok "$name"
+  else
+    failed "$name - $bad drifted, $empty failed responses (wanted one constant host) from $url"
+  fi
+}
+
 cleanup() {
   note "tearing down"
   # shellcheck disable=SC2086
   docker compose $PROFILE_ARGS down --remove-orphans --timeout 5 >/dev/null 2>&1 || true
+  [ -n "${STICKY_DIR:-}" ] && rm -rf "$STICKY_DIR"
 }
 trap cleanup EXIT INT TERM
 
@@ -113,6 +140,7 @@ docker compose $PROFILE_ARGS up -d --build --wait --wait-timeout 180
 
 BASE_HTTP="http://localhost:8080"
 BASE_HTTPS="https://localhost:8443"
+STICKY_DIR="$(mktemp -d)"   # cookie jars for the sticky pinning checks
 
 # --- the proxy itself, independent of any backend ---------------------------
 check        "landing page over http"      "$BASE_HTTP/"               "reverse-proxy-cluster"
@@ -170,6 +198,13 @@ for profile in $PROFILES; do
       else
         failed "failover: could not stop node-backend-primary"
       fi
+      ;;
+    sticky)
+      check "sticky: /sticky/messages"                "$BASE_HTTP/sticky/messages"    '"backend":"node"'
+      check "sticky: /sticky/messages over https"     "$BASE_HTTPS/sticky/messages"   '"backend":"node"' -k
+      check_rotates       "sticky: rotation without cookie" "$BASE_HTTP/sticky/messages" 2
+      check_host_constant "sticky: jar A pinned"      "$BASE_HTTP/sticky/messages"    "$STICKY_DIR/a.jar"
+      check_host_constant "sticky: jar B pinned"      "$BASE_HTTP/sticky/messages"    "$STICKY_DIR/b.jar"
       ;;
     *)
       printf 'unknown profile: %s\n' "$profile" >&2
