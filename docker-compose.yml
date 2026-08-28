@@ -139,6 +139,38 @@ services:
       retries: 3
       start_period: 5s
 
+  node-backend-sticky-1:
+    build: ./backends/node
+    hostname: node-backend-sticky-1
+    profiles: ["sticky"]
+    environment:
+      ROUTE: node-backend-sticky-1
+    restart: unless-stopped
+    networks:
+      - proxy-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/messages"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  node-backend-sticky-2:
+    build: ./backends/node
+    hostname: node-backend-sticky-2
+    profiles: ["sticky"]
+    environment:
+      ROUTE: node-backend-sticky-2
+    restart: unless-stopped
+    networks:
+      - proxy-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/messages"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
 networks:
   proxy-net:
     driver: bridge
