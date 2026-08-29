@@ -355,3 +355,6 @@ The Java backend additionally has `@WebMvcTest` unit tests
 `docs/REVIEW.md` is the frozen review that motivated the modernization of the
 proxy image (pinning, trimming, 2.4-only config). It is a historical record —
 do not update it to match later changes.
+
+`docs/BACKLOG.md` is the product backlog: deferred and future work collected
+from the design specs' out-of-scope sections.

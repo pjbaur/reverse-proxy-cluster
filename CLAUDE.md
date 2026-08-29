@@ -83,6 +83,8 @@ docker compose --profile balanced down
 - `.github/workflows/ci.yml` + `.github/compose.cache.yml` — CI builds all
   profiles with GitHub Actions layer caches, then runs the smoke suite.
 - `docs/REVIEW.md` — frozen historical review; do not update it.
+- `docs/BACKLOG.md` — product backlog (deferred/future work from the design
+  specs); move items here when a design defers them.
 
 ## Conventions
 
