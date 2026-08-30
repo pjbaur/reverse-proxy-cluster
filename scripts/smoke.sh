@@ -1,7 +1,7 @@
 #!/bin/sh
 # scripts/smoke.sh — the project's test suite.
 #
-# Builds the stack, starts the requested Compose profiles (default: all seven),
+# Builds the stack, starts the requested Compose profiles (default: all eight),
 # waits until every container reports healthy, then exercises every route and
 # tears the stack down again. All checks run even if one fails (so a single
 # failure doesn't hide others); any failure exits non-zero.
@@ -17,7 +17,7 @@ cd "$ROOT"
 if [ "$#" -gt 0 ]; then
   PROFILES="$*"
 else
-  PROFILES="java nginx node python balanced failover sticky"
+  PROFILES="java nginx node python balanced failover sticky busy"
 fi
 
 PROFILE_ARGS=""
@@ -120,6 +120,49 @@ check_host_constant() {
   fi
 }
 
+# check_avoids_busy <name> <url> — holds one ?delay=5000 request in flight
+# against the url, then fetches 4 fast ones while it runs; every fast
+# response's "host" must be identical and differ from the slow request's
+# host (bybusyness skips the member with the active request; byrequests
+# would alternate members, failing constancy).
+check_avoids_busy() {
+  name="$1"; url="$2"
+  body_file="$(mktemp)"
+  hosts=""
+  curl -fsS "$url?delay=5000" -o "$body_file" 2>/dev/null &
+  slow_pid=$!
+  sleep 0.6
+  i=0; empty=0
+  while [ "$i" -lt 4 ]; do
+    h="$(curl -fsS "$url" 2>/dev/null | sed -n 's/.*"host":"\([^"]*\)".*/\1/p')" || h=""
+    if [ -n "$h" ]; then
+      hosts="$hosts $h"
+    else
+      empty=$((empty + 1))
+    fi
+    i=$((i + 1))
+  done
+  wait "$slow_pid" 2>/dev/null || true
+  slow_host="$(sed -n 's/.*"host":"\([^"]*\)".*/\1/p' "$body_file")"
+  rm -f "$body_file"
+  bad=0; first=""
+  for h in $hosts; do
+    if [ -z "$first" ]; then
+      first="$h"
+    elif [ "$h" != "$first" ]; then
+      bad=$((bad + 1))
+    fi
+  done
+  if [ "$first" = "$slow_host" ]; then
+    bad=$((bad + 1))
+  fi
+  if [ "$bad" -eq 0 ] && [ "$empty" -eq 0 ] && [ -n "$first" ] && [ -n "$slow_host" ]; then
+    ok "$name"
+  else
+    failed "$name - fast hosts '$hosts' not constant on the other member (slow: '$slow_host', empty: $empty) from $url"
+  fi
+}
+
 cleanup() {
   note "tearing down"
   # shellcheck disable=SC2086
@@ -216,6 +259,13 @@ for profile in $PROFILES; do
       check_rotates       "sticky: rotation without cookie" "$BASE_HTTP/sticky/messages" 2
       check_host_constant "sticky: jar A pinned"      "$BASE_HTTP/sticky/messages"    "$STICKY_DIR/a.jar"
       check_host_constant "sticky: jar B pinned"      "$BASE_HTTP/sticky/messages"    "$STICKY_DIR/b.jar"
+      ;;
+    busy)
+      check "busy: /busy/messages"                  "$BASE_HTTP/busy/messages"              '"backend":"node"'
+      check "busy: X-Forwarded-Proto=http"          "$BASE_HTTP/busy/messages"              '"x_forwarded_proto":"http"'
+      check "busy: /busy/messages over https"       "$BASE_HTTPS/busy/messages"             '"backend":"node"' -k
+      check "busy: delay parameter honored"         "$BASE_HTTP/busy/messages?delay=500"    '"backend":"node"'
+      check_avoids_busy "busy: bybusyness avoids the busy member" "$BASE_HTTP/busy/messages"
       ;;
     *)
       printf 'unknown profile: %s\n' "$profile" >&2
