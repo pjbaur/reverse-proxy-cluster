@@ -170,6 +170,9 @@ cleanup() {
   if [ -n "${STICKY_DIR:-}" ]; then
     rm -rf "$STICKY_DIR"
   fi
+  if [ -n "${body_file:-}" ]; then
+    rm -f "$body_file"
+  fi
 }
 trap cleanup EXIT INT TERM
 
