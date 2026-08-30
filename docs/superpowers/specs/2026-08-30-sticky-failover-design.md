@@ -115,8 +115,12 @@ env for the jvmRoute-style cookie) with the failover roles:
     restart: unless-stopped
     networks:
       - proxy-net
-    healthcheck:   # same shape as the primary
-      ...
+    healthcheck:   # identical to the primary's
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/messages"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 ```
 
 ### Proxy config — `reverse-proxy/apacheconf/sites/28-stickyfailover.conf`
@@ -170,9 +174,14 @@ the point). The choreography, in order:
    `/stickyfailover-strict/`, each verified pinned to the primary
    (`check_host_constant`).
 3. **Outage.** `docker compose stop node-backend-sf-primary`; warm each
-   balancer through its transition request (first request after the stop is
-   nondeterministic — DNS lookup failure or a long timeout — exactly as in
-   the `failover` case; discard it), then:
+   balancer through its transition request with the *pinned* client (jar A
+   on the default balancer, jar B on the strict one). The first request
+   after the stop is nondeterministic — DNS lookup failure or a long
+   timeout — exactly as in the `failover` case; discard it. The pinned warm
+   request is also what puts each balancer's primary worker into error
+   state: a cookie-less warm request would be elected straight to the
+   standby and never touch the dead primary, so on the strict balancer it
+   would not create the 503 condition. Then:
    - default, jar A: every response from the standby
      (`check_host_exact_jar`) — the session moved;
    - default, cookie-less: the standby also serves;
@@ -189,7 +198,7 @@ the point). The choreography, in order:
 
 Checks 4a and 4c are the demo's answer to the backlog question and are
 deterministic — the cookie's route decides, not scheduling. Expected total
-for the case: ~13 checks (all-profile run goes 37 → ~50).
+for the case: 14 checks (all-profile run goes 37 → 51).
 
 ### Documentation
 
