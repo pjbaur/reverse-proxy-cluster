@@ -71,3 +71,13 @@ services:
       context: ./backends/node
       cache_from: ["type=gha,scope=node-backend"]
       cache_to: ["type=gha,mode=max,scope=node-backend"]
+  node-backend-sf-primary:
+    build:
+      context: ./backends/node
+      cache_from: ["type=gha,scope=node-backend"]
+      cache_to: ["type=gha,mode=max,scope=node-backend"]
+  node-backend-sf-standby:
+    build:
+      context: ./backends/node
+      cache_from: ["type=gha,scope=node-backend"]
+      cache_to: ["type=gha,mode=max,scope=node-backend"]

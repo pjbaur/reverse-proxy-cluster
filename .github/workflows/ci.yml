@@ -23,7 +23,7 @@ jobs:
           docker compose \
             -f docker-compose.yml \
             -f .github/compose.cache.yml \
-            --profile java --profile nginx --profile node --profile python --profile balanced --profile failover --profile sticky --profile busy \
+            --profile java --profile nginx --profile node --profile python --profile balanced --profile failover --profile sticky --profile busy --profile stickyfailover \
             build
 
       - name: Smoke test (full stack)
