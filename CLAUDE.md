@@ -32,7 +32,7 @@ The test suite is `scripts/smoke.sh`; the Java unit tests run inside the
 scripts/gen-dev-certs.sh
 
 # Start the proxy plus one backend, every backend, or one of the demos
-# (balanced: 3 node replicas; failover: hot-standby pair)
+# (balanced: round-robin; failover: hot-standby; sticky: affinity; busy: bybusyness)
 docker compose --profile java up -d --build
 docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover --profile sticky --profile busy up -d --build
 docker compose --profile balanced up -d --build
