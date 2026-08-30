@@ -21,6 +21,7 @@ the proxy by URL prefix:
 | `/failover/` | `balancer://failover` → node-backend-primary/standby | `failover` | 2× node: hot standby (`status=+H`) |
 | `/sticky/` | `balancer://sticky` → node-backend-sticky-1/2 | `sticky` | 2× node: session affinity (`stickysession`) |
 | `/busy/` | `balancer://busy` → node-backend-busy-1/2 | `busy` | 2× node: `lbmethod=bybusyness` |
+| `/stickyfailover/`, `/stickyfailover-strict/` | `balancer://stickyfailover(-strict)` → node-backend-sf-primary/standby | `stickyfailover` | 2× node: sticky + hot standby (`nofailover` contrast) |
 
 The test suite is `scripts/smoke.sh`; the Java unit tests run inside the
 `java-backend` image build. See README.md for the full architecture.
@@ -32,15 +33,17 @@ The test suite is `scripts/smoke.sh`; the Java unit tests run inside the
 scripts/gen-dev-certs.sh
 
 # Start the proxy plus one backend, every backend, or one of the demos
-# (balanced: round-robin; failover: hot-standby; sticky: affinity; busy: bybusyness)
+# (balanced: round-robin; failover: hot-standby; sticky: affinity; busy: bybusyness;
+#  stickyfailover: sticky hot standby)
 docker compose --profile java up -d --build
-docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover --profile sticky --profile busy up -d --build
+docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover --profile sticky --profile busy --profile stickyfailover up -d --build
 docker compose --profile balanced up -d --build
 docker compose --profile failover up -d --build   # hot-standby failover demo
 docker compose --profile sticky up -d --build    # session-affinity (sticky) demo
 docker compose --profile busy up -d --build       # bybusyness demo
+docker compose --profile stickyfailover up -d --build  # sticky + hot-standby combo demo
 
-# Test suite — all profiles (37 checks) or any subset
+# Test suite — all profiles (51 checks) or any subset
 scripts/smoke.sh
 scripts/smoke.sh java node
 
@@ -55,10 +58,11 @@ docker compose --profile balanced down
 
 ## Structure
 
-- `docker-compose.yml` — all fourteen services (proxy, four single backends,
+- `docker-compose.yml` — all sixteen services (proxy, four single backends,
   three `balanced` replicas, the `failover` primary/standby pair, the
-  `sticky` pair, the `busy` pair), the `proxy-net` network, published ports,
-  and the single source of truth for healthchecks (busybox `wget`).
+  `sticky` pair, the `busy` pair, the `stickyfailover` pair), the
+  `proxy-net` network, published ports, and the single source of truth for
+  healthchecks (busybox `wget`).
 - `reverse-proxy/Dockerfile` — patch-pinned base image; bakes in `httpd.conf`,
   `apacheconf/sites/`, the landing page and the dev certificate.
 - `reverse-proxy/httpd.conf` — trimmed, 2.4-only base config (18 modules);
@@ -74,6 +78,9 @@ docker compose --profile balanced down
   `node-backend-sticky-1/2` with `route=` + `stickysession=SESSIONID`),
   `27-busy.conf` (`balancer://busy` bybusyness:
   `node-backend-busy-1/2` with `lbmethod=bybusyness`),
+  `28-stickyfailover.conf` (two balancers over one sticky primary +
+  `status=+H` standby pair: default failover vs `nofailover=On` session
+  break),
   `90-ssl.conf` (the only `<VirtualHost *:443>`; inherits all
   server-level routing).
 - `backends/<name>/` — one self-contained directory per backend (Dockerfile +
@@ -152,6 +159,13 @@ docker compose --profile balanced down
   match `stickysession=`. Any drift degrades stickiness silently to
   round-robin — no error, just rotation; the smoke pinning checks are the
   only guard.
+- **A sticky standby needs its own route, and failover rewrites the pin.**
+  Give the `status=+H` member a `route=`/`ROUTE` like any other (a session
+  that lands on it must be able to pin there, or it degrades to
+  round-robin). With the default `nofailover=Off` a pinned session moves to
+  the standby and its cookie is rewritten, so it never migrates home — only
+  new clients re-elect the recovered primary. `nofailover=On` breaks the
+  session (503) instead, and it resumes on the primary after recovery.
 - **Module set stays explicit.** `httpd.conf` loads 18 modules by design;
   a new feature adds its own `LoadModule` lines (the balancer cost three:
   `mod_slotmem_shm`, `mod_proxy_balancer`, `mod_lbmethod_byrequests`;

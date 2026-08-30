@@ -14,6 +14,9 @@ A seventh profile, `sticky`, pins each client to one member via a session
 cookie at `/sticky/` — see [Sticky sessions demo](#sticky-sessions-demo).
 An eighth profile, `busy`, routes by in-flight request count
 (`lbmethod=bybusyness`) at `/busy/` — see [Busy demo](#busy-demo-bybusyness).
+A ninth profile, `stickyfailover`, combines session affinity with a hot
+standby at `/stickyfailover/` and `/stickyfailover-strict/` — see
+[Sticky failover demo](#sticky-failover-demo).
 
 ## Architecture
 
@@ -40,10 +43,17 @@ client ──▶ :8443 (https) ─┘   │  TLS terminated here, self-signed de
                               │                 session affinity (stickysession=SESSIONID):
                               │                 ├─▶ node-backend-sticky-1 :8080  ◀─ cookie suffix .node-backend-sticky-1
                               │                 └─▶ node-backend-sticky-2 :8080  ◀─ cookie suffix .node-backend-sticky-2
-                              └─▶ /busy/    ─▶ balancer://busy     (profile busy)
-                                                bybusyness (fewest active requests):
-                                                ├─▶ node-backend-busy-1 :8080  ◀─ skipped while holding a ?delay=ms request
-                                                └─▶ node-backend-busy-2 :8080
+                              ├─▶ /busy/    ─▶ balancer://busy     (profile busy)
+                              │                 bybusyness (fewest active requests):
+                              │                 ├─▶ node-backend-busy-1 :8080  ◀─ skipped while holding a ?delay=ms request
+                              │                 └─▶ node-backend-busy-2 :8080
+                              ├─▶ /stickyfailover/ ─▶ balancer://stickyfailover (profile stickyfailover)
+                              │                 sticky hot standby (a pinned session fails over):
+                              │                 ├─▶ node-backend-sf-primary :8080  ◀─ serves all
+                              │                 └─▶ node-backend-sf-standby :8080  ◀─ on error only
+                              └─▶ /stickyfailover-strict/ ─▶ balancer://stickyfailover-strict
+                                                nofailover=On (a pinned session breaks, 503):
+                                                └─▶ the same two members as /stickyfailover/
 ```
 
 | Service         | Image                                     | Profile  | Published ports | Route       |
@@ -57,6 +67,7 @@ client ──▶ :8443 (https) ─┘   │  TLS terminated here, self-signed de
 | node-backend-primary, node-backend-standby | `node:22-alpine` (same build as `node-backend`) | `failover` | none | `/failover/` (via `balancer://failover`) |
 | node-backend-sticky-1, node-backend-sticky-2 | `node:22-alpine` (same build as `node-backend`) | `sticky` | none | `/sticky/` (via `balancer://sticky`) |
 | node-backend-busy-1, node-backend-busy-2 | `node:22-alpine` (same build as `node-backend`) | `busy` | none | `/busy/` (via `balancer://busy`) |
+| node-backend-sf-primary, node-backend-sf-standby | `node:22-alpine` (same build as `node-backend`) | `stickyfailover` | none | `/stickyfailover/` and `/stickyfailover-strict/` (via `balancer://stickyfailover(-strict)`) |
 
 All services attach to the `proxy-net` bridge network; the proxy reaches each
 backend by its Compose service name (`http://java-backend:8080` and so on).
@@ -79,10 +90,10 @@ curl http://localhost:8080/java/messages       # proxied to the Spring Boot back
 curl -k https://localhost:8443/java/messages   # same route over TLS
 ```
 
-To run every backend, list all eight profiles:
+To run every backend, list all nine profiles:
 
 ```sh
-docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover --profile sticky --profile busy up -d --build
+docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover --profile sticky --profile busy --profile stickyfailover up -d --build
 ```
 
 Teardown — pass the same `--profile` flags you used to start:
@@ -105,6 +116,8 @@ docker compose --profile java down
 | `GET /failover/messages` | `balancer://failover` | `failover` | JSON; `host` is `node-backend-primary`, or `-standby` while it is down |
 | `GET /sticky/messages` | `balancer://sticky` | `sticky` | JSON; `host` is constant per client cookie, alternating without one |
 | `GET /busy/messages[?delay=ms]` | `balancer://busy` | `busy` | JSON; while a `?delay=` request is in flight, every fast request lands on the *other* member |
+| `GET /stickyfailover/messages` | `balancer://stickyfailover` | `stickyfailover` | JSON; a pinned session moves to `-standby` while the primary is down and **stays there** after recovery |
+| `GET /stickyfailover-strict/messages` | `balancer://stickyfailover-strict` | `stickyfailover` | JSON while healthy; **503** for a pinned client while its member is down |
 | `GET /balancer-manager` | reverse-proxy | —             | `mod_proxy_balancer` dashboard              |
 | `GET /server-status` | reverse-proxy | —             | Apache `mod_status` page                    |
 | any other path      | reverse-proxy  | —             | 404                                         |
@@ -284,6 +297,56 @@ you are watching is the balancer's routing decision, which is exactly what
 the `busy` balancer; its `Elected` counts diverge while a slow request
 runs.
 
+## Sticky failover demo
+
+The `stickyfailover` profile answers what the `sticky` and `failover` demos
+exercise separately: what a pinned session does when its member dies. The
+node backend twice (`node-backend-sf-primary` + `node-backend-sf-standby`)
+sits behind **two** balancers that differ only in one `ProxySet` flag, in
+`reverse-proxy/apacheconf/sites/28-stickyfailover.conf`:
+
+- `balancer://stickyfailover` (default `nofailover=Off`) — a pinned session
+  **moves**: the primary's failure puts its worker in error state, the
+  request falls back to the `status=+H` standby, and the standby's response
+  rewrites the cookie to the standby's route. When the primary returns, the
+  session **stays on the standby** — a healthy hot standby is a valid
+  sticky target, so recovery re-homes only new, cookie-less clients.
+- `balancer://stickyfailover-strict` (`nofailover=On`) — a pinned session
+  **breaks**: requests whose cookie names the dead primary get `503`
+  instead of silently moving (the behavior to want when backends do not
+  replicate sessions). Cookie-less clients still get the standby. The
+  session's cookie kept naming the primary the whole time, so it resumes
+  **on the primary** the moment it recovers.
+
+```sh
+docker compose --profile stickyfailover up -d --build
+
+# pin a jar to the primary on both balancers
+curl -s -c jar.txt -b jar.txt http://localhost:8080/stickyfailover/messages | grep -o '"host":"[^"]*"'
+curl -s -c jars.txt -b jars.txt http://localhost:8080/stickyfailover-strict/messages | grep -o '"host":"[^"]*"'
+
+docker compose --profile stickyfailover stop node-backend-sf-primary
+# the first request after the stop is the nondeterministic transition - discard it
+curl -s -c jar.txt -b jar.txt http://localhost:8080/stickyfailover/messages >/dev/null || true
+curl -s -c jars.txt -b jars.txt http://localhost:8080/stickyfailover-strict/messages >/dev/null || true
+
+# default: the session moved - every response from the standby
+curl -s -c jar.txt -b jar.txt http://localhost:8080/stickyfailover/messages | grep -o '"host":"[^"]*"'
+# strict: the session broke - 503
+curl -s -o /dev/null -w '%{http_code}\n' -b jars.txt http://localhost:8080/stickyfailover-strict/messages
+
+docker compose --profile stickyfailover up -d --wait node-backend-sf-primary
+# default: still the standby (the cookie was rewritten); strict: the primary again
+curl -s -c jar.txt -b jar.txt http://localhost:8080/stickyfailover/messages | grep -o '"host":"[^"]*"'
+curl -s -b jars.txt http://localhost:8080/stickyfailover-strict/messages | grep -o '"host":"[^"]*"'
+
+curl -k https://localhost:8443/stickyfailover/messages   # same routes over TLS
+docker compose --profile stickyfailover down
+```
+
+The two recovery landings are the point of the demo and are deterministic —
+the cookie's route decides, not scheduling.
+
 ## Tests
 
 `scripts/smoke.sh` is the test suite. It builds the stack, starts the
@@ -292,7 +355,7 @@ each route, then tears the stack down again. All checks run even if an earlier
 one failed, and any failure exits non-zero:
 
 ```sh
-scripts/smoke.sh               # all eight profiles — 37 checks
+scripts/smoke.sh               # all nine profiles — 51 checks
 scripts/smoke.sh java node     # any subset
 ```
 
@@ -302,8 +365,8 @@ is missing, so it is also the one-command verification of a fresh clone.
 CI (`.github/workflows/ci.yml`) runs a single job on every push to `master`
 and on pull requests: set up buildx, generate the certificate, build five
 distinct images — the `balanced` replicas, the `failover` pair, the
-`sticky` pair and the `busy` pair are nine services sharing the single
-node image — with GitHub Actions layer caching (merged from
+`sticky` pair, the `busy` pair and the `stickyfailover` pair are eleven
+services sharing the single node image — with GitHub Actions layer caching (merged from
 `.github/compose.cache.yml`), then run `scripts/smoke.sh`.
 
 The Java backend additionally has `@WebMvcTest` unit tests
@@ -350,6 +413,12 @@ The Java backend additionally has `@WebMvcTest` unit tests
     `/busy/` `ProxyPass`/`ProxyPassReverse` pair. Same worker-parameters rule
     as 24: `retry=0` lives on the `BalancerMember` lines, not the balancer
     `ProxyPass`.
+  - `28-stickyfailover.conf` — sticky hot standby: TWO `<Proxy>` blocks over
+    the same member pair; `balancer://stickyfailover` is the default
+    (a pinned session fails over to the standby and stays there after
+    recovery) and `balancer://stickyfailover-strict` adds `nofailover=On`
+    (a pinned session breaks with 503 instead). Worker parameters on the
+    `BalancerMember` lines, same rule as 24.
   - `90-ssl.conf` — the only `<VirtualHost>` (`*:443`). Everything else is
     server-level config that port 80 serves directly and the vhost inherits,
     so both listeners behave identically. The `SSLSessionCache` directives
@@ -372,11 +441,12 @@ The Java backend additionally has `@WebMvcTest` unit tests
   built into every Alpine image (busybox). `nginx-backend`, `python-backend`,
   and the three balanced replicas (`node-backend-1/2/3`), the failover
   pair (`node-backend-primary`/`node-backend-standby`), the sticky
-  pair (`node-backend-sticky-1`/`-2`) and the busy pair
-  (`node-backend-busy-1`/`-2`) probe `http://127.0.0.1/...` because
-  their listeners are IPv4-only while busybox `wget` resolves `localhost`
-  to `::1` first; `reverse-proxy` and `java-backend` use `localhost`. Every
-  service sets `restart: unless-stopped`.
+  pair (`node-backend-sticky-1`/`-2`), the busy pair
+  (`node-backend-busy-1`/`-2`) and the stickyfailover pair
+  (`node-backend-sf-primary`/`-standby`) probe `http://127.0.0.1/...`
+  because their listeners are IPv4-only while busybox `wget` resolves
+  `localhost` to `::1` first; `reverse-proxy` and `java-backend` use
+  `localhost`. Every service sets `restart: unless-stopped`.
 
 ## Troubleshooting
 

@@ -8,17 +8,7 @@ value, not commitment.
 
 ## Open items
 
-### 1. Sticky sessions interacting with failover members
-
-Combine `balancer://sticky`-style session affinity with a `status=+H` hot
-standby: does pinning survive primary failure, and where does the session
-land during recovery? The two demos currently exercise these behaviors in
-isolation.
-
-Source: `docs/superpowers/specs/2026-08-27-sticky-sessions-design.md`
-(out of scope).
-
-### 2. URL-embedded session ids
+### 1. URL-embedded session ids
 
 `stickysession` also supports `;SESSIONID=...` URL embedding
 (`stickyforce`, URL rewriting) in addition to the cookie path the demo uses.
@@ -27,7 +17,7 @@ A small contrast demo or README section would show it.
 Source: `docs/superpowers/specs/2026-08-27-sticky-sessions-design.md`
 (out of scope).
 
-### 3. A non-node backend inside a balancer
+### 2. A non-node backend inside a balancer
 
 All three balancer demos (`balanced`, `failover`, `sticky`) ride on the
 zero-dependency node backend. Putting a second stack (nginx or python)
@@ -41,7 +31,7 @@ Sources: `2026-08-25-balancer-demo-design.md`,
 `2026-08-27-sticky-sessions-design.md` (all list "non-node backends" as out
 of scope).
 
-### 4. More balancer members
+### 3. More balancer members
 
 Grow `balancer://demo` beyond three members (or the failover pair beyond
 two). Per the conventions in CLAUDE.md this means new named services plus
@@ -51,7 +41,7 @@ mostly Compose plumbing plus smoke-check updates.
 Source: `docs/superpowers/specs/2026-08-27-failover-demo-design.md`
 (out of scope).
 
-### 5. Swarm integration
+### 4. Swarm integration
 
 Running the demo under Docker Swarm (multiple hosts, `docker stack deploy`)
 instead of single-host Compose. Largest scope item here; would change the
@@ -83,3 +73,7 @@ Deferred items that were later implemented — kept for context:
 - **Hot-standby failover** — deferred 2026-08-25 in the balancer design,
   shipped 2026-08-27 as the `failover` profile (`25-failover.conf`,
   `node-backend-primary/standby`).
+- **Sticky sessions interacting with failover members** — deferred
+  2026-08-27 in the sticky design, shipped 2026-08-30 as the
+  `stickyfailover` profile (`28-stickyfailover.conf`,
+  `node-backend-sf-primary/standby`; also demonstrates `nofailover=On`).
