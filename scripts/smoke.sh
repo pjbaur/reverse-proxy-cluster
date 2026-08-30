@@ -17,7 +17,7 @@ cd "$ROOT"
 if [ "$#" -gt 0 ]; then
   PROFILES="$*"
 else
-  PROFILES="java nginx node python balanced failover sticky busy"
+  PROFILES="java nginx node python balanced failover sticky busy stickyfailover"
 fi
 
 PROFILE_ARGS=""
@@ -269,6 +269,13 @@ for profile in $PROFILES; do
       check "busy: /busy/messages over https"       "$BASE_HTTPS/busy/messages"             '"backend":"node"' -k
       check "busy: delay parameter honored"         "$BASE_HTTP/busy/messages?delay=500"    '"backend":"node"'
       check_avoids_busy "busy: bybusyness avoids the busy member" "$BASE_HTTP/busy/messages"
+      ;;
+    stickyfailover)
+      check "stickyfailover: /stickyfailover/messages"               "$BASE_HTTP/stickyfailover/messages"              '"backend":"node"'
+      check "stickyfailover: X-Forwarded-Proto=http"                 "$BASE_HTTP/stickyfailover/messages"              '"x_forwarded_proto":"http"'
+      check "stickyfailover: /stickyfailover/messages over https"    "$BASE_HTTPS/stickyfailover/messages"             '"backend":"node"' -k
+      check_host_exact "stickyfailover: unpinned always primary"     "$BASE_HTTP/stickyfailover/messages"              node-backend-sf-primary
+      check "stickyfailover: strict /stickyfailover-strict/messages" "$BASE_HTTP/stickyfailover-strict/messages"       '"backend":"node"'
       ;;
     *)
       printf 'unknown profile: %s\n' "$profile" >&2

@@ -199,6 +199,38 @@ services:
       retries: 3
       start_period: 5s
 
+  node-backend-sf-primary:
+    build: ./backends/node
+    hostname: node-backend-sf-primary
+    profiles: ["stickyfailover"]
+    environment:
+      ROUTE: node-backend-sf-primary
+    restart: unless-stopped
+    networks:
+      - proxy-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/messages"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  node-backend-sf-standby:
+    build: ./backends/node
+    hostname: node-backend-sf-standby
+    profiles: ["stickyfailover"]
+    environment:
+      ROUTE: node-backend-sf-standby
+    restart: unless-stopped
+    networks:
+      - proxy-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/messages"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
 networks:
   proxy-net:
     driver: bridge
