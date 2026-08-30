@@ -366,8 +366,8 @@ CI (`.github/workflows/ci.yml`) runs a single job on every push to `master`
 and on pull requests: set up buildx, generate the certificate, build five
 distinct images — the `balanced` replicas, the `failover` pair, the
 `sticky` pair, the `busy` pair and the `stickyfailover` pair are eleven
-services sharing the single node image — with GitHub Actions layer caching (merged from
-`.github/compose.cache.yml`), then run `scripts/smoke.sh`.
+services sharing the single node image — with GitHub Actions layer caching
+(merged from `.github/compose.cache.yml`), then run `scripts/smoke.sh`.
 
 The Java backend additionally has `@WebMvcTest` unit tests
 (`backends/java/src/test/`). Its image build runs `mvn package` without

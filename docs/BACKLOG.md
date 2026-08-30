@@ -19,9 +19,10 @@ Source: `docs/superpowers/specs/2026-08-27-sticky-sessions-design.md`
 
 ### 2. A non-node backend inside a balancer
 
-All three balancer demos (`balanced`, `failover`, `sticky`) ride on the
-zero-dependency node backend. Putting a second stack (nginx or python)
-behind `mod_proxy_balancer` would show the balancer is backend-agnostic.
+All five balancer demos (`balanced`, `failover`, `sticky`, `busy`,
+`stickyfailover`) ride on the zero-dependency node backend. Putting a
+second stack (nginx or python) behind `mod_proxy_balancer` would show
+the balancer is backend-agnostic.
 Touches: new balancer member services, one `BalancerMember` line each, and
 possibly the `host`-field contract if the backend cannot echo container
 hostname the way the node app does.

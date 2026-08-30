@@ -1,7 +1,7 @@
 #!/bin/sh
 # scripts/smoke.sh — the project's test suite.
 #
-# Builds the stack, starts the requested Compose profiles (default: all eight),
+# Builds the stack, starts the requested Compose profiles (default: all nine),
 # waits until every container reports healthy, then exercises every route and
 # tears the stack down again. All checks run even if one fails (so a single
 # failure doesn't hide others); any failure exits non-zero.
@@ -308,10 +308,15 @@ for profile in $PROFILES; do
         # itself and is nondeterministic (DNS lookup failure -> 500, or a
         # block on the dead address until the ~60 s Timeout) — discard it.
         # The pinned warm request is also what puts each balancer's PRIMARY
-        # worker into error state: the two balancers track error state
-        # independently, and a cookie-less warm request would be elected
-        # straight to the standby without ever touching the dead primary —
-        # on the strict balancer that would not create the 503 condition.
+        # worker into error state — the sticky route lookup deterministically
+        # aims the request at the dead primary on EACH balancer (the two
+        # balancers track worker error state independently), so the error
+        # state is guaranteed regardless of election order; byrequests would
+        # elect the not-yet-errored primary for a cookie-less warm too (the
+        # failover case above relies on exactly that). And on the default
+        # balancer the standby's response rewrites jar A's cookie to the
+        # standby route — the precondition the "stays on standby" recovery
+        # check asserts.
         curl -fsS --max-time 70 -b "$STICKY_DIR/sfa.jar" -c "$STICKY_DIR/sfa.jar" \
           "$BASE_HTTP/stickyfailover/messages" >/dev/null 2>&1 || true
         curl -fsS --max-time 70 -b "$STICKY_DIR/sfb.jar" -c "$STICKY_DIR/sfb.jar" \
