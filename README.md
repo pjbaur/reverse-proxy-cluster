@@ -12,6 +12,8 @@ A sixth profile, `failover`, pairs an active primary with a hot standby at
 `/failover/` — see [Failover demo](#failover-demo).
 A seventh profile, `sticky`, pins each client to one member via a session
 cookie at `/sticky/` — see [Sticky sessions demo](#sticky-sessions-demo).
+An eighth profile, `busy`, routes by in-flight request count
+(`lbmethod=bybusyness`) at `/busy/` — see [Busy demo](#busy-demo-bybusyness).
 
 ## Architecture
 
@@ -34,10 +36,14 @@ client ──▶ :8443 (https) ─┘   │  TLS terminated here, self-signed de
                               │                 hot standby (status=+H):
                               │                 ├─▶ node-backend-primary :8080  ◀─ serves all
                               │                 └─▶ node-backend-standby :8080  ◀─ on error only
-                              └─▶ /sticky/  ─▶ balancer://sticky  (profile sticky)
-                                                session affinity (stickysession=SESSIONID):
-                                                ├─▶ node-backend-sticky-1 :8080  ◀─ cookie suffix .node-backend-sticky-1
-                                                └─▶ node-backend-sticky-2 :8080  ◀─ cookie suffix .node-backend-sticky-2
+                              ├─▶ /sticky/  ─▶ balancer://sticky  (profile sticky)
+                              │                 session affinity (stickysession=SESSIONID):
+                              │                 ├─▶ node-backend-sticky-1 :8080  ◀─ cookie suffix .node-backend-sticky-1
+                              │                 └─▶ node-backend-sticky-2 :8080  ◀─ cookie suffix .node-backend-sticky-2
+                              └─▶ /busy/    ─▶ balancer://busy     (profile busy)
+                                                bybusyness (fewest active requests):
+                                                ├─▶ node-backend-busy-1 :8080  ◀─ skipped while holding a ?delay=ms request
+                                                └─▶ node-backend-busy-2 :8080
 ```
 
 | Service         | Image                                     | Profile  | Published ports | Route       |
@@ -50,6 +56,7 @@ client ──▶ :8443 (https) ─┘   │  TLS terminated here, self-signed de
 | node-backend-1 … 3 | `node:22-alpine` (same build as `node-backend`) | `balanced` | none      | `/balanced/` (via `balancer://demo`) |
 | node-backend-primary, node-backend-standby | `node:22-alpine` (same build as `node-backend`) | `failover` | none | `/failover/` (via `balancer://failover`) |
 | node-backend-sticky-1, node-backend-sticky-2 | `node:22-alpine` (same build as `node-backend`) | `sticky` | none | `/sticky/` (via `balancer://sticky`) |
+| node-backend-busy-1, node-backend-busy-2 | `node:22-alpine` (same build as `node-backend`) | `busy` | none | `/busy/` (via `balancer://busy`) |
 
 All services attach to the `proxy-net` bridge network; the proxy reaches each
 backend by its Compose service name (`http://java-backend:8080` and so on).
@@ -72,10 +79,10 @@ curl http://localhost:8080/java/messages       # proxied to the Spring Boot back
 curl -k https://localhost:8443/java/messages   # same route over TLS
 ```
 
-To run every backend, list all seven profiles:
+To run every backend, list all eight profiles:
 
 ```sh
-docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover --profile sticky up -d --build
+docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover --profile sticky --profile busy up -d --build
 ```
 
 Teardown — pass the same `--profile` flags you used to start:
@@ -97,6 +104,7 @@ docker compose --profile java down
 | `GET /balanced/messages` | `balancer://demo` | `balanced` | JSON; `host` names the replica that answered |
 | `GET /failover/messages` | `balancer://failover` | `failover` | JSON; `host` is `node-backend-primary`, or `-standby` while it is down |
 | `GET /sticky/messages` | `balancer://sticky` | `sticky` | JSON; `host` is constant per client cookie, alternating without one |
+| `GET /busy/messages[?delay=ms]` | `balancer://busy` | `busy` | JSON; while a `?delay=` request is in flight, every fast request lands on the *other* member |
 | `GET /balancer-manager` | reverse-proxy | —             | `mod_proxy_balancer` dashboard              |
 | `GET /server-status` | reverse-proxy | —             | Apache `mod_status` page                    |
 | any other path      | reverse-proxy  | —             | 404                                         |
@@ -246,6 +254,36 @@ If the cookie name, the `.` suffix, or the route/`ROUTE`/service-name
 triple ever drifts, stickiness degrades silently to round-robin — no
 error, just rotation. The smoke suite's pinning checks are the guard.
 
+## Busy demo (bybusyness)
+
+The `busy` profile adds a second load-balancing method: the node backend
+twice (`node-backend-busy-1` + `node-backend-busy-2`) behind
+`balancer://busy` in `reverse-proxy/apacheconf/sites/27-busy.conf`, this
+time with `ProxySet lbmethod=bybusyness`. Where `byrequests` (the
+`balanced` demo) alternates by request count, `bybusyness` elects the
+member with the fewest *active* requests — so a member holding a long
+request is skipped until it finishes. The node backend's `?delay=<ms>`
+parameter (clamped 0–10000) is how a request is made long:
+
+```sh
+docker compose --profile busy up -d --build
+
+# terminal 1 — hold one member busy for 5 s (note which host answers)
+curl -s "http://localhost:8080/busy/messages?delay=5000" | grep -o '"host":"[^"]*"'
+
+# terminal 2, while terminal 1 hangs — every fast request takes the OTHER member
+curl -s http://localhost:8080/busy/messages | grep -o '"host":"[^"]*"'
+
+curl -k https://localhost:8443/busy/messages   # same route over TLS
+docker compose --profile busy down
+```
+
+Node answers concurrent requests fine — the member is not saturated; what
+you are watching is the balancer's routing decision, which is exactly what
+`bybusyness` exposes and `byrequests` ignores. `/balancer-manager` lists
+the `busy` balancer; its `Elected` counts diverge while a slow request
+runs.
+
 ## Tests
 
 `scripts/smoke.sh` is the test suite. It builds the stack, starts the
@@ -254,7 +292,7 @@ each route, then tears the stack down again. All checks run even if an earlier
 one failed, and any failure exits non-zero:
 
 ```sh
-scripts/smoke.sh               # all seven profiles — 32 checks
+scripts/smoke.sh               # all eight profiles — 37 checks
 scripts/smoke.sh java node     # any subset
 ```
 
@@ -263,10 +301,10 @@ is missing, so it is also the one-command verification of a fresh clone.
 
 CI (`.github/workflows/ci.yml`) runs a single job on every push to `master`
 and on pull requests: set up buildx, generate the certificate, build five
-distinct images — the `balanced` replicas, the `failover` pair and the
-`sticky` pair are seven services sharing the single node image — with
-GitHub Actions layer caching (merged from `.github/compose.cache.yml`),
-then run `scripts/smoke.sh`.
+distinct images — the `balanced` replicas, the `failover` pair, the
+`sticky` pair and the `busy` pair are nine services sharing the single
+node image — with GitHub Actions layer caching (merged from
+`.github/compose.cache.yml`), then run `scripts/smoke.sh`.
 
 The Java backend additionally has `@WebMvcTest` unit tests
 (`backends/java/src/test/`). Its image build runs `mvn package` without
@@ -275,7 +313,7 @@ The Java backend additionally has `@WebMvcTest` unit tests
 ## Configuration model
 
 - `reverse-proxy/httpd.conf` — trimmed base config, Apache 2.4-only syntax,
-  17 modules. Serves the landing page, logs to stdout/stderr, and pulls in
+  18 modules. Serves the landing page, logs to stdout/stderr, and pulls in
   everything else via `IncludeOptional conf/sites/*.conf`.
 - `reverse-proxy/apacheconf/sites/` — per-topic config, included in numeric
   (alphabetical) order:
@@ -307,6 +345,11 @@ The Java backend additionally has `@WebMvcTest` unit tests
     `.`-suffix of the client's `SESSIONID` cookie. Same worker-parameters
     rule as 24: worker parameters live on the `BalancerMember` lines, not
     the balancer `ProxyPass`.
+  - `27-busy.conf` — the bybusyness pair: `<Proxy "balancer://busy">` with
+    two `BalancerMember` lines and `ProxySet lbmethod=bybusyness`, plus the
+    `/busy/` `ProxyPass`/`ProxyPassReverse` pair. Same worker-parameters rule
+    as 24: `retry=0` lives on the `BalancerMember` lines, not the balancer
+    `ProxyPass`.
   - `90-ssl.conf` — the only `<VirtualHost>` (`*:443`). Everything else is
     server-level config that port 80 serves directly and the vhost inherits,
     so both listeners behave identically. The `SSLSessionCache` directives
@@ -328,8 +371,9 @@ The Java backend additionally has `@WebMvcTest` unit tests
 - Healthchecks are defined once in `docker-compose.yml` using the `wget`
   built into every Alpine image (busybox). `nginx-backend`, `python-backend`,
   and the three balanced replicas (`node-backend-1/2/3`), the failover
-  pair (`node-backend-primary`/`node-backend-standby`) and the sticky
-  pair (`node-backend-sticky-1`/`-2`) probe `http://127.0.0.1/...` because
+  pair (`node-backend-primary`/`node-backend-standby`), the sticky
+  pair (`node-backend-sticky-1`/`-2`) and the busy pair
+  (`node-backend-busy-1`/`-2`) probe `http://127.0.0.1/...` because
   their listeners are IPv4-only while busybox `wget` resolves `localhost`
   to `::1` first; `reverse-proxy` and `java-backend` use `localhost`. Every
   service sets `restart: unless-stopped`.

@@ -8,21 +8,7 @@ value, not commitment.
 
 ## Open items
 
-### 1. `bybusyness` load-balancing contrast demo
-
-Queued the longest — named as deferred in three straight design specs
-(balanced, failover, sticky). A second balancer route using
-`lbmethod=bybusyness` would contrast with the existing `byrequests`
-round-robin in `/balanced/`, showing how Apache shifts traffic away from busy
-members. Requires one new `LoadModule` line
-(`mod_lbmethod_bybusyness`) and a new numbered site config; the existing
-conventions for balancer members (named services, explicit
-`BalancerMember` lines) apply unchanged.
-
-Source: `docs/superpowers/specs/2026-08-25-balancer-demo-design.md` (out of
-scope), re-confirmed in the 2026-08-27 failover and sticky designs.
-
-### 2. Sticky sessions interacting with failover members
+### 1. Sticky sessions interacting with failover members
 
 Combine `balancer://sticky`-style session affinity with a `status=+H` hot
 standby: does pinning survive primary failure, and where does the session
@@ -32,7 +18,7 @@ isolation.
 Source: `docs/superpowers/specs/2026-08-27-sticky-sessions-design.md`
 (out of scope).
 
-### 3. URL-embedded session ids
+### 2. URL-embedded session ids
 
 `stickysession` also supports `;SESSIONID=...` URL embedding
 (`stickyforce`, URL rewriting) in addition to the cookie path the demo uses.
@@ -41,7 +27,7 @@ A small contrast demo or README section would show it.
 Source: `docs/superpowers/specs/2026-08-27-sticky-sessions-design.md`
 (out of scope).
 
-### 4. A non-node backend inside a balancer
+### 3. A non-node backend inside a balancer
 
 All three balancer demos (`balanced`, `failover`, `sticky`) ride on the
 zero-dependency node backend. Putting a second stack (nginx or python)
@@ -55,7 +41,7 @@ Sources: `2026-08-25-balancer-demo-design.md`,
 `2026-08-27-sticky-sessions-design.md` (all list "non-node backends" as out
 of scope).
 
-### 5. More balancer members
+### 4. More balancer members
 
 Grow `balancer://demo` beyond three members (or the failover pair beyond
 two). Per the conventions in CLAUDE.md this means new named services plus
@@ -65,7 +51,7 @@ mostly Compose plumbing plus smoke-check updates.
 Source: `docs/superpowers/specs/2026-08-27-failover-demo-design.md`
 (out of scope).
 
-### 6. Swarm integration
+### 5. Swarm integration
 
 Running the demo under Docker Swarm (multiple hosts, `docker stack deploy`)
 instead of single-host Compose. Largest scope item here; would change the
@@ -88,6 +74,9 @@ Not backlog — decided against, recorded so they are not re-litigated:
 
 Deferred items that were later implemented — kept for context:
 
+- **`bybusyness` contrast** — deferred 2026-08-25 in the balancer design,
+  shipped 2026-08-29 as the `busy` profile (`27-busy.conf`,
+  `node-backend-busy-1/2`, `?delay=` in the node backend).
 - **Sticky sessions / session affinity** — deferred 2026-08-25 in the
   balancer design, shipped 2026-08-27 as the `sticky` profile
   (`26-sticky.conf`, `node-backend-sticky-1/2`).

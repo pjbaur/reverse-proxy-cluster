@@ -20,6 +20,7 @@ the proxy by URL prefix:
 | `/balanced/` | `balancer://demo` → node-backend-1/2/3 | `balanced` | 3× node replicas behind `mod_proxy_balancer` |
 | `/failover/` | `balancer://failover` → node-backend-primary/standby | `failover` | 2× node: hot standby (`status=+H`) |
 | `/sticky/` | `balancer://sticky` → node-backend-sticky-1/2 | `sticky` | 2× node: session affinity (`stickysession`) |
+| `/busy/` | `balancer://busy` → node-backend-busy-1/2 | `busy` | 2× node: `lbmethod=bybusyness` |
 
 The test suite is `scripts/smoke.sh`; the Java unit tests run inside the
 `java-backend` image build. See README.md for the full architecture.
@@ -33,12 +34,13 @@ scripts/gen-dev-certs.sh
 # Start the proxy plus one backend, every backend, or one of the demos
 # (balanced: 3 node replicas; failover: hot-standby pair)
 docker compose --profile java up -d --build
-docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover --profile sticky up -d --build
+docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover --profile sticky --profile busy up -d --build
 docker compose --profile balanced up -d --build
 docker compose --profile failover up -d --build   # hot-standby failover demo
 docker compose --profile sticky up -d --build    # session-affinity (sticky) demo
+docker compose --profile busy up -d --build       # bybusyness demo
 
-# Test suite — all profiles (32 checks) or any subset
+# Test suite — all profiles (37 checks) or any subset
 scripts/smoke.sh
 scripts/smoke.sh java node
 
@@ -53,13 +55,13 @@ docker compose --profile balanced down
 
 ## Structure
 
-- `docker-compose.yml` — all twelve services (proxy, four single backends,
+- `docker-compose.yml` — all fourteen services (proxy, four single backends,
   three `balanced` replicas, the `failover` primary/standby pair, the
-  `sticky` pair), the `proxy-net` network, published ports, and the single
-  source of truth for healthchecks (busybox `wget`).
+  `sticky` pair, the `busy` pair), the `proxy-net` network, published ports,
+  and the single source of truth for healthchecks (busybox `wget`).
 - `reverse-proxy/Dockerfile` — patch-pinned base image; bakes in `httpd.conf`,
   `apacheconf/sites/`, the landing page and the dev certificate.
-- `reverse-proxy/httpd.conf` — trimmed, 2.4-only base config (17 modules);
+- `reverse-proxy/httpd.conf` — trimmed, 2.4-only base config (18 modules);
   `IncludeOptional conf/sites/*.conf`.
 - `reverse-proxy/apacheconf/sites/` — numbered per-topic config:
   `00-server-status.conf` (loopback + RFC 1918), `10-proxy.conf`
@@ -70,12 +72,15 @@ docker compose --profile balanced down
   `node-backend-primary` + `node-backend-standby` with `status=+H`),
   `26-sticky.conf` (`balancer://sticky` session affinity:
   `node-backend-sticky-1/2` with `route=` + `stickysession=SESSIONID`),
+  `27-busy.conf` (`balancer://busy` bybusyness:
+  `node-backend-busy-1/2` with `lbmethod=bybusyness`),
   `90-ssl.conf` (the only `<VirtualHost *:443>`; inherits all
   server-level routing).
 - `backends/<name>/` — one self-contained directory per backend (Dockerfile +
   app). Contract: listen on a port; `GET /messages` returns JSON with
   `backend`, `message`, `host` and the echoed `X-Forwarded-Proto`/`Port`/`For`
-  headers (nginx, being static, serves that JSON as a file instead).
+  headers (nginx, being static, serves that JSON as a file instead), and (node)
+  accepts `?delay=<ms>` clamped 0–10000 to hold the response for a balancer demo.
 - `scripts/gen-dev-certs.sh` — writes the self-signed certificate into the
   gitignored `reverse-proxy/certs/`.
 - `scripts/smoke.sh` — build, start, wait for health, check every route, tear
@@ -147,9 +152,10 @@ docker compose --profile balanced down
   match `stickysession=`. Any drift degrades stickiness silently to
   round-robin — no error, just rotation; the smoke pinning checks are the
   only guard.
-- **Module set stays explicit.** `httpd.conf` loads 17 modules by design;
+- **Module set stays explicit.** `httpd.conf` loads 18 modules by design;
   a new feature adds its own `LoadModule` lines (the balancer cost three:
-  `mod_slotmem_shm`, `mod_proxy_balancer`, `mod_lbmethod_byrequests`).
+  `mod_slotmem_shm`, `mod_proxy_balancer`, `mod_lbmethod_byrequests`;
+  bybusyness a fourth: `mod_lbmethod_bybusyness`).
 - **Apache 2.4 syntax only** in all proxy configuration.
 - **Pinning:** the proxy is patch-pinned (it is the demo's subject); backends
   are major-pinned.
