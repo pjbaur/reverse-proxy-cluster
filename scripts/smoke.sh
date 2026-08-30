@@ -120,6 +120,29 @@ check_host_constant() {
   fi
 }
 
+# check_host_exact_jar <name> <url> <jar> <expected-host> — fetches 6 times
+# through a curl cookie jar; every response's "host" must equal
+# expected-host. Where a jar-carrying client lands is deterministic (the
+# cookie's route decides), unlike plain byrequests rotation.
+check_host_exact_jar() {
+  name="$1"; url="$2"; jar="$3"; want="$4"
+  i=0; bad=0; empty=0
+  while [ "$i" -lt 6 ]; do
+    h="$(curl -fsS -b "$jar" -c "$jar" "$url" 2>/dev/null | sed -n 's/.*"host":"\([^"]*\)".*/\1/p')" || h=""
+    if [ -z "$h" ]; then
+      empty=$((empty + 1))
+    elif [ "$h" != "$want" ]; then
+      bad=$((bad + 1))
+    fi
+    i=$((i + 1))
+  done
+  if [ "$bad" -eq 0 ] && [ "$empty" -eq 0 ]; then
+    ok "$name"
+  else
+    failed "$name - $bad wrong, $empty failed responses (wanted all '$want') from $url"
+  fi
+}
+
 # check_avoids_busy <name> <url> — holds one ?delay=5000 request in flight
 # against the url, then fetches 4 fast ones while it runs; every fast
 # response's "host" must be identical and differ from the slow request's
@@ -276,6 +299,8 @@ for profile in $PROFILES; do
       check "stickyfailover: /stickyfailover/messages over https"    "$BASE_HTTPS/stickyfailover/messages"             '"backend":"node"' -k
       check_host_exact "stickyfailover: unpinned always primary"     "$BASE_HTTP/stickyfailover/messages"              node-backend-sf-primary
       check "stickyfailover: strict /stickyfailover-strict/messages" "$BASE_HTTP/stickyfailover-strict/messages"       '"backend":"node"'
+      check_host_exact_jar "stickyfailover: jar A pinned to primary"       "$BASE_HTTP/stickyfailover/messages"        "$STICKY_DIR/sfa.jar" node-backend-sf-primary
+      check_host_exact_jar "stickyfailover: jar B pinned to primary"       "$BASE_HTTP/stickyfailover-strict/messages" "$STICKY_DIR/sfb.jar" node-backend-sf-primary
       ;;
     *)
       printf 'unknown profile: %s\n' "$profile" >&2
