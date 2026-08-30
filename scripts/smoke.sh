@@ -301,6 +301,50 @@ for profile in $PROFILES; do
       check "stickyfailover: strict /stickyfailover-strict/messages" "$BASE_HTTP/stickyfailover-strict/messages"       '"backend":"node"'
       check_host_exact_jar "stickyfailover: jar A pinned to primary"       "$BASE_HTTP/stickyfailover/messages"        "$STICKY_DIR/sfa.jar" node-backend-sf-primary
       check_host_exact_jar "stickyfailover: jar B pinned to primary"       "$BASE_HTTP/stickyfailover-strict/messages" "$STICKY_DIR/sfb.jar" node-backend-sf-primary
+      # shellcheck disable=SC2086
+      if docker compose $PROFILE_ARGS stop node-backend-sf-primary >/dev/null 2>&1; then
+        # Warm both balancers through their transition request with the
+        # pinned clients. The first request after the stop is the transition
+        # itself and is nondeterministic (DNS lookup failure -> 500, or a
+        # block on the dead address until the ~60 s Timeout) — discard it.
+        # The pinned warm request is also what puts each balancer's PRIMARY
+        # worker into error state: the two balancers track error state
+        # independently, and a cookie-less warm request would be elected
+        # straight to the standby without ever touching the dead primary —
+        # on the strict balancer that would not create the 503 condition.
+        curl -fsS --max-time 70 -b "$STICKY_DIR/sfa.jar" -c "$STICKY_DIR/sfa.jar" \
+          "$BASE_HTTP/stickyfailover/messages" >/dev/null 2>&1 || true
+        curl -fsS --max-time 70 -b "$STICKY_DIR/sfb.jar" -c "$STICKY_DIR/sfb.jar" \
+          "$BASE_HTTP/stickyfailover-strict/messages" >/dev/null 2>&1 || true
+        check_host_exact_jar "stickyfailover: pinned session moved to standby" \
+          "$BASE_HTTP/stickyfailover/messages" "$STICKY_DIR/sfa.jar" node-backend-sf-standby
+        check_host_exact "stickyfailover: cookie-less served by standby" \
+          "$BASE_HTTP/stickyfailover/messages" node-backend-sf-standby
+        check_status "stickyfailover: strict pinned session breaks (503)" 503 \
+          "$BASE_HTTP/stickyfailover-strict/messages" -b "$STICKY_DIR/sfb.jar" -c "$STICKY_DIR/sfb.jar"
+        check_host_exact "stickyfailover: strict cookie-less still served" \
+          "$BASE_HTTP/stickyfailover-strict/messages" node-backend-sf-standby
+        # shellcheck disable=SC2086
+        if docker compose $PROFILE_ARGS up -d --wait --wait-timeout 60 node-backend-sf-primary >/dev/null 2>&1; then
+          # --wait outlasts the primary's 5 s retry window (the healthcheck
+          # interval alone is 10 s), so the primary worker is usable again.
+          # The landing spots are still decided by the cookies: jar A's was
+          # rewritten to the standby by its failover response and a healthy
+          # standby is a valid sticky target, so it STAYS on the standby;
+          # jar B's still names the primary (its 503s carried no cookie), so
+          # it resumes exactly where it broke.
+          check_host_exact_jar "stickyfailover: failed-over session stays on standby" \
+            "$BASE_HTTP/stickyfailover/messages" "$STICKY_DIR/sfa.jar" node-backend-sf-standby
+          check_host_exact "stickyfailover: fresh client back on primary" \
+            "$BASE_HTTP/stickyfailover/messages" node-backend-sf-primary
+          check_host_exact_jar "stickyfailover: strict session resumes on primary" \
+            "$BASE_HTTP/stickyfailover-strict/messages" "$STICKY_DIR/sfb.jar" node-backend-sf-primary
+        else
+          failed "stickyfailover: primary did not come back healthy after restart"
+        fi
+      else
+        failed "stickyfailover: could not stop node-backend-sf-primary"
+      fi
       ;;
     *)
       printf 'unknown profile: %s\n' "$profile" >&2
