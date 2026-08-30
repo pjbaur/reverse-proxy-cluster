@@ -11,7 +11,8 @@ balancer at `/balanced/` — see [Load-balancing demo](#load-balancing-demo).
 A sixth profile, `failover`, pairs an active primary with a hot standby at
 `/failover/` — see [Failover demo](#failover-demo).
 A seventh profile, `sticky`, pins each client to one member via a session
-cookie at `/sticky/` — see [Sticky sessions demo](#sticky-sessions-demo).
+cookie or a URL-embedded session id at `/sticky/` — see
+[Sticky sessions demo](#sticky-sessions-demo).
 An eighth profile, `busy`, routes by in-flight request count
 (`lbmethod=bybusyness`) at `/busy/` — see [Busy demo](#busy-demo-bybusyness).
 A ninth profile, `stickyfailover`, combines session affinity with a hot
@@ -114,7 +115,7 @@ docker compose --profile java down
 | `GET /python/messages` | python-backend | `python`   | JSON; echoes `X-Forwarded-*` headers        |
 | `GET /balanced/messages` | `balancer://demo` | `balanced` | JSON; `host` names the replica that answered |
 | `GET /failover/messages` | `balancer://failover` | `failover` | JSON; `host` is `node-backend-primary`, or `-standby` while it is down |
-| `GET /sticky/messages` | `balancer://sticky` | `sticky` | JSON; `host` is constant per client cookie, alternating without one |
+| `GET /sticky/messages` | `balancer://sticky` | `sticky` | JSON; `host` is constant per client cookie, alternating without one; `?SESSIONID=<id>.<route>` or `;SESSIONID=...` in the URL pins without a cookie and overrides the cookie |
 | `GET /busy/messages[?delay=ms]` | `balancer://busy` | `busy` | JSON; while a `?delay=` request is in flight, every fast request lands on the *other* member |
 | `GET /stickyfailover/messages` | `balancer://stickyfailover` | `stickyfailover` | JSON; a pinned session moves to `-standby` while the primary is down and **stays there** after recovery |
 | `GET /stickyfailover-strict/messages` | `balancer://stickyfailover-strict` | `stickyfailover` | JSON while healthy; **503** for a pinned client while its member is down |
@@ -260,6 +261,39 @@ docker compose --profile sticky down
 
 A second jar (`-c jar2.txt -b jar2.txt`) pins independently — it may land
 on either member, but it stays there: affinity is per client, not global.
+
+The session id can also travel in the URL itself, no cookie required —
+the same `stickysession=SESSIONID` reads it. Two forms: a query
+parameter (`?SESSIONID=<id>.<route>`, always enabled) and the
+servlet-style path parameter (`;SESSIONID=<id>.<route>`, enabled by
+`scolonpathdelim=On` in `26-sticky.conf`; the node app strips the
+`;`-segment the way a servlet container would). A URL parameter takes
+precedence over a cookie, and an unknown route id is simply ignored
+(round-robin):
+
+```sh
+# pin by query parameter — lands on sticky-2
+curl -s "http://localhost:8080/sticky/messages?SESSIONID=x.node-backend-sticky-2" | grep -o '"host":"[^"]*"'
+
+# pin by servlet-style path parameter — lands on sticky-1
+curl -s "http://localhost:8080/sticky/messages;SESSIONID=x.node-backend-sticky-1" | grep -o '"host":"[^"]*"'
+
+# a URL parameter beats the cookie: jar pinned to sticky-1, URL says sticky-2
+curl -s -c jar.txt -b jar.txt "http://localhost:8080/sticky/messages;SESSIONID=x.node-backend-sticky-1" >/dev/null
+curl -s -c jar.txt -b jar.txt "http://localhost:8080/sticky/messages?SESSIONID=x.node-backend-sticky-2" | grep -o '"host":"[^"]*"'
+
+# unknown route id: no error, plain round-robin
+curl -s "http://localhost:8080/sticky/messages?SESSIONID=x.no-such-route" | grep -o '"host":"[^"]*"'
+```
+
+httpd 2.4 has no `stickyforce` knob (the name floats around old mailing
+lists); the behavior people usually mean by it — a pinned session
+breaking with 503 instead of failing over — is `nofailover=On`, which
+the [stickyfailover demo](#sticky-failover-demo) shows. The proxy never
+rewrites session ids into response URLs: embedding them in the links it
+serves is the backend's job (servlet containers do it when they render
+pages).
+
 `/balancer-manager` lists the `sticky` balancer with each member's route
 in its URL column.
 
@@ -355,7 +389,7 @@ each route, then tears the stack down again. All checks run even if an earlier
 one failed, and any failure exits non-zero:
 
 ```sh
-scripts/smoke.sh               # all nine profiles — 51 checks
+scripts/smoke.sh               # all nine profiles — 55 checks
 scripts/smoke.sh java node     # any subset
 ```
 
@@ -405,9 +439,12 @@ The Java backend additionally has `@WebMvcTest` unit tests
     two `BalancerMember` lines carrying `route=node-backend-sticky-1/2`
     (each matching that service's `ROUTE` env var and `hostname:`), plus
     `ProxySet stickysession=SESSIONID` — the balancer routes by the
-    `.`-suffix of the client's `SESSIONID` cookie. Same worker-parameters
-    rule as 24: worker parameters live on the `BalancerMember` lines, not
-    the balancer `ProxyPass`.
+    `.`-suffix of the client's `SESSIONID` cookie.
+    `scolonpathdelim=On` additionally lets the same id arrive as the
+    servlet-style path parameter `;SESSIONID=...` (the query-string form
+    needs nothing); a URL parameter takes precedence over the cookie. Same
+    worker-parameters rule as 24: worker parameters live on the
+    `BalancerMember` lines, not the balancer `ProxyPass`.
   - `27-busy.conf` — the bybusyness pair: `<Proxy "balancer://busy">` with
     two `BalancerMember` lines and `ProxySet lbmethod=bybusyness`, plus the
     `/busy/` `ProxyPass`/`ProxyPassReverse` pair. Same worker-parameters rule

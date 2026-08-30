@@ -43,7 +43,7 @@ docker compose --profile sticky up -d --build    # session-affinity (sticky) dem
 docker compose --profile busy up -d --build       # bybusyness demo
 docker compose --profile stickyfailover up -d --build  # sticky + hot-standby combo demo
 
-# Test suite — all profiles (51 checks) or any subset
+# Test suite — all profiles (55 checks) or any subset
 scripts/smoke.sh
 scripts/smoke.sh java node
 
@@ -75,7 +75,8 @@ docker compose --profile balanced down
   `25-failover.conf` (`balancer://failover` hot standby:
   `node-backend-primary` + `node-backend-standby` with `status=+H`),
   `26-sticky.conf` (`balancer://sticky` session affinity:
-  `node-backend-sticky-1/2` with `route=` + `stickysession=SESSIONID`),
+  `node-backend-sticky-1/2` with `route=` + `stickysession=SESSIONID` +
+  `scolonpathdelim=On` for `;SESSIONID=` URL embedding),
   `27-busy.conf` (`balancer://busy` bybusyness:
   `node-backend-busy-1/2` with `lbmethod=bybusyness`),
   `28-stickyfailover.conf` (two balancers over one sticky primary +

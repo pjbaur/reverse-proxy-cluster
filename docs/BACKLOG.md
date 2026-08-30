@@ -8,16 +8,7 @@ value, not commitment.
 
 ## Open items
 
-### 1. URL-embedded session ids
-
-`stickysession` also supports `;SESSIONID=...` URL embedding
-(`stickyforce`, URL rewriting) in addition to the cookie path the demo uses.
-A small contrast demo or README section would show it.
-
-Source: `docs/superpowers/specs/2026-08-27-sticky-sessions-design.md`
-(out of scope).
-
-### 2. A non-node backend inside a balancer
+### 1. A non-node backend inside a balancer
 
 All five balancer demos (`balanced`, `failover`, `sticky`, `busy`,
 `stickyfailover`) ride on the zero-dependency node backend. Putting a
@@ -32,7 +23,7 @@ Sources: `2026-08-25-balancer-demo-design.md`,
 `2026-08-27-sticky-sessions-design.md` (all list "non-node backends" as out
 of scope).
 
-### 3. More balancer members
+### 2. More balancer members
 
 Grow `balancer://demo` beyond three members (or the failover pair beyond
 two). Per the conventions in CLAUDE.md this means new named services plus
@@ -42,7 +33,7 @@ mostly Compose plumbing plus smoke-check updates.
 Source: `docs/superpowers/specs/2026-08-27-failover-demo-design.md`
 (out of scope).
 
-### 4. Swarm integration
+### 3. Swarm integration
 
 Running the demo under Docker Swarm (multiple hosts, `docker stack deploy`)
 instead of single-host Compose. Largest scope item here; would change the
@@ -78,3 +69,7 @@ Deferred items that were later implemented — kept for context:
   2026-08-27 in the sticky design, shipped 2026-08-30 as the
   `stickyfailover` profile (`28-stickyfailover.conf`,
   `node-backend-sf-primary/standby`; also demonstrates `nofailover=On`).
+- **URL-embedded session ids** — deferred 2026-08-27 in the sticky
+  design, shipped 2026-08-30 as an extension of the `sticky` profile
+  (`scolonpathdelim=On` in `26-sticky.conf`, `;`-path stripping in the
+  node backend; query and servlet forms, URL-over-cookie precedence).
