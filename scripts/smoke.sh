@@ -285,6 +285,19 @@ for profile in $PROFILES; do
       check_rotates       "sticky: rotation without cookie" "$BASE_HTTP/sticky/messages" 2
       check_host_constant "sticky: jar A pinned"      "$BASE_HTTP/sticky/messages"    "$STICKY_DIR/a.jar"
       check_host_constant "sticky: jar B pinned"      "$BASE_HTTP/sticky/messages"    "$STICKY_DIR/b.jar"
+      check_host_exact "sticky: query-form URL pins" \
+        "$BASE_HTTP/sticky/messages?SESSIONID=x.node-backend-sticky-2" node-backend-sticky-2
+      check_host_exact "sticky: servlet-form URL pins" \
+        "$BASE_HTTP/sticky/messages;SESSIONID=x.node-backend-sticky-1" node-backend-sticky-1
+      # Seed u.jar deterministically via the servlet form (that member's
+      # Set-Cookie fills the jar with sticky-1's route), then let the URL
+      # parameter name the other member: the URL wins over the cookie.
+      curl -fsS -c "$STICKY_DIR/u.jar" -b "$STICKY_DIR/u.jar" \
+        "$BASE_HTTP/sticky/messages;SESSIONID=x.node-backend-sticky-1" >/dev/null 2>&1 || true
+      check_host_exact_jar "sticky: URL param overrides cookie" \
+        "$BASE_HTTP/sticky/messages?SESSIONID=x.node-backend-sticky-2" "$STICKY_DIR/u.jar" node-backend-sticky-2
+      check_status "sticky: unknown URL route falls back to 200" 200 \
+        "$BASE_HTTP/sticky/messages?SESSIONID=x.no-such-route"
       ;;
     busy)
       check "busy: /busy/messages"                  "$BASE_HTTP/busy/messages"              '"backend":"node"'
