@@ -2,6 +2,9 @@
 // no package.json, no package manager, nothing to install.
 // GET /messages accepts ?delay=<ms> (clamped 0-10000): the response is held
 // for that many milliseconds so a balancer demo can keep one member busy.
+// A ";" path segment (;SESSIONID=...) is stripped from the path: the proxy
+// leaves it in the proxied request, and servlet containers strip it
+// themselves — without this the route would 404.
 'use strict';
 
 const http = require('node:http');
@@ -14,7 +17,7 @@ const PORT = 8080;
 const route = process.env.ROUTE || null;
 
 const server = http.createServer((req, res) => {
-  const path = req.url.split('?')[0];
+  const path = req.url.split('?')[0].split(';')[0];
   const params = new URL(req.url, 'http://localhost').searchParams;
   // absent / non-numeric / negative -> 0; capped at 10 s so a typo can't hang anything
   const delayMs = Math.min(Math.max(parseInt(params.get('delay'), 10) || 0, 0), 10000);
