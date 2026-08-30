@@ -121,10 +121,9 @@ pinned to one member by then):
    expecting `node-backend-sticky-1`.
 3. `check_host_exact_jar "sticky: URL param overrides cookie"` on
    `"$BASE_HTTP/sticky/messages?SESSIONID=x.node-backend-sticky-2"` with
-   a jar already holding a cookie naming sticky-1 (pinned explicitly
-   before this check via the servlet-form URL so the setup is
-   deterministic), expecting `node-backend-sticky-2` — the URL param
-   won.
+   a fresh jar `"$STICKY_DIR/u.jar"` first pinned deterministically via
+   the servlet-form URL naming sticky-1 (that member's `Set-Cookie` fills
+   the jar), expecting `node-backend-sticky-2` — the URL param won.
 4. `check_status "sticky: unknown URL route falls back to 200"` 200 on
    `"$BASE_HTTP/sticky/messages?SESSIONID=x.no-such-route"` — an
    unknown route id is not an error; the balancer serves normally.
