@@ -22,6 +22,7 @@ the proxy by URL prefix:
 | `/sticky/` | `balancer://sticky` → node-backend-sticky-1/2 | `sticky` | 2× node: session affinity (`stickysession`) |
 | `/busy/` | `balancer://busy` → node-backend-busy-1/2 | `busy` | 2× node: `lbmethod=bybusyness` |
 | `/stickyfailover/`, `/stickyfailover-strict/` | `balancer://stickyfailover(-strict)` → node-backend-sf-primary/standby | `stickyfailover` | 2× node: sticky + hot standby (`nofailover` contrast) |
+| `/mixed/` | `balancer://mixed` → node-backend-mixed-1 + python-backend-mixed-1 | `mixed` | node + python behind one round-robin balancer (backend-agnostic demo) |
 
 The test suite is `scripts/smoke.sh`; the Java unit tests run inside the
 `java-backend` image build. See README.md for the full architecture.
@@ -34,16 +35,17 @@ scripts/gen-dev-certs.sh
 
 # Start the proxy plus one backend, every backend, or one of the demos
 # (balanced: round-robin; failover: hot-standby; sticky: affinity; busy: bybusyness;
-#  stickyfailover: sticky hot standby)
+#  stickyfailover: sticky hot standby; mixed: node+python in one balancer)
 docker compose --profile java up -d --build
-docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover --profile sticky --profile busy --profile stickyfailover up -d --build
+docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover --profile sticky --profile busy --profile stickyfailover --profile mixed up -d --build
 docker compose --profile balanced up -d --build
 docker compose --profile failover up -d --build   # hot-standby failover demo
 docker compose --profile sticky up -d --build    # session-affinity (sticky) demo
 docker compose --profile busy up -d --build       # bybusyness demo
 docker compose --profile stickyfailover up -d --build  # sticky + hot-standby combo demo
+docker compose --profile mixed up -d --build        # mixed-stack balancer demo
 
-# Test suite — all profiles (55 checks) or any subset
+# Test suite — all profiles (59 checks) or any subset
 scripts/smoke.sh
 scripts/smoke.sh java node
 
@@ -58,11 +60,11 @@ docker compose --profile balanced down
 
 ## Structure
 
-- `docker-compose.yml` — all sixteen services (proxy, four single backends,
+- `docker-compose.yml` — all eighteen services (proxy, four single backends,
   three `balanced` replicas, the `failover` primary/standby pair, the
-  `sticky` pair, the `busy` pair, the `stickyfailover` pair), the
-  `proxy-net` network, published ports, and the single source of truth for
-  healthchecks (busybox `wget`).
+  `sticky` pair, the `busy` pair, the `stickyfailover` pair, the `mixed`
+  node+python pair), the `proxy-net` network, published ports, and the single
+  source of truth for healthchecks (busybox `wget`).
 - `reverse-proxy/Dockerfile` — patch-pinned base image; bakes in `httpd.conf`,
   `apacheconf/sites/`, the landing page and the dev certificate.
 - `reverse-proxy/httpd.conf` — trimmed, 2.4-only base config (18 modules);
@@ -82,6 +84,8 @@ docker compose --profile balanced down
   `28-stickyfailover.conf` (two balancers over one sticky primary +
   `status=+H` standby pair: default failover vs `nofailover=On` session
   break),
+  `29-mixed.conf` (`balancer://mixed`: one node + one python member in a
+  `byrequests` round-robin — the backend-agnostic demo),
   `90-ssl.conf` (the only `<VirtualHost *:443>`; inherits all
   server-level routing).
 - `backends/<name>/` — one self-contained directory per backend (Dockerfile +

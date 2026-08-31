@@ -8,22 +8,7 @@ value, not commitment.
 
 ## Open items
 
-### 1. A non-node backend inside a balancer
-
-All five balancer demos (`balanced`, `failover`, `sticky`, `busy`,
-`stickyfailover`) ride on the zero-dependency node backend. Putting a
-second stack (nginx or python) behind `mod_proxy_balancer` would show
-the balancer is backend-agnostic.
-Touches: new balancer member services, one `BalancerMember` line each, and
-possibly the `host`-field contract if the backend cannot echo container
-hostname the way the node app does.
-
-Sources: `2026-08-25-balancer-demo-design.md`,
-`2026-08-27-failover-demo-design.md`,
-`2026-08-27-sticky-sessions-design.md` (all list "non-node backends" as out
-of scope).
-
-### 2. More balancer members
+### 1. More balancer members
 
 Grow `balancer://demo` beyond three members (or the failover pair beyond
 two). Per the conventions in CLAUDE.md this means new named services plus
@@ -33,7 +18,7 @@ mostly Compose plumbing plus smoke-check updates.
 Source: `docs/superpowers/specs/2026-08-27-failover-demo-design.md`
 (out of scope).
 
-### 3. Swarm integration
+### 2. Swarm integration
 
 Running the demo under Docker Swarm (multiple hosts, `docker stack deploy`)
 instead of single-host Compose. Largest scope item here; would change the
@@ -73,3 +58,8 @@ Deferred items that were later implemented — kept for context:
   design, shipped 2026-08-30 as an extension of the `sticky` profile
   (`scolonpathdelim=On` in `26-sticky.conf`, `;`-path stripping in the
   node backend; query and servlet forms, URL-over-cookie precedence).
+- **A non-node backend inside a balancer** — deferred 2026-08-25 in the
+  balancer design (re-deferred by the failover and sticky designs), shipped
+  2026-08-30 as the `mixed` profile (`29-mixed.conf`,
+  `node-backend-mixed-1` + `python-backend-mixed-1` in one `byrequests`
+  round-robin).

@@ -18,6 +18,9 @@ An eighth profile, `busy`, routes by in-flight request count
 A ninth profile, `stickyfailover`, combines session affinity with a hot
 standby at `/stickyfailover/` and `/stickyfailover-strict/` — see
 [Sticky failover demo](#sticky-failover-demo).
+A tenth profile, `mixed`, puts a node and a python backend behind one
+round-robin balancer at `/mixed/` — see
+[Mixed-stack balancer demo](#mixed-stack-balancer-demo).
 
 ## Architecture
 
@@ -52,6 +55,10 @@ client ──▶ :8443 (https) ─┘   │  TLS terminated here, self-signed de
                               │                 sticky hot standby (a pinned session fails over):
                               │                 ├─▶ node-backend-sf-primary :8080  ◀─ serves all
                               │                 └─▶ node-backend-sf-standby :8080  ◀─ on error only
+                              ├─▶ /mixed/   ─▶ balancer://mixed    (profile mixed)
+                              │                 byrequests round-robin over two stacks:
+                              │                 ├─▶ node-backend-mixed-1   :8080
+                              │                 └─▶ python-backend-mixed-1 :8080
                               └─▶ /stickyfailover-strict/ ─▶ balancer://stickyfailover-strict
                                                 nofailover=On (a pinned session breaks, 503):
                                                 └─▶ the same two members as /stickyfailover/
@@ -69,6 +76,7 @@ client ──▶ :8443 (https) ─┘   │  TLS terminated here, self-signed de
 | node-backend-sticky-1, node-backend-sticky-2 | `node:22-alpine` (same build as `node-backend`) | `sticky` | none | `/sticky/` (via `balancer://sticky`) |
 | node-backend-busy-1, node-backend-busy-2 | `node:22-alpine` (same build as `node-backend`) | `busy` | none | `/busy/` (via `balancer://busy`) |
 | node-backend-sf-primary, node-backend-sf-standby | `node:22-alpine` (same build as `node-backend`) | `stickyfailover` | none | `/stickyfailover/` and `/stickyfailover-strict/` (via `balancer://stickyfailover(-strict)`) |
+| node-backend-mixed-1, python-backend-mixed-1 | `node:22-alpine` + `python:3.12-alpine` (same builds as `node-backend` / `python-backend`) | `mixed` | none | `/mixed/` (via `balancer://mixed`) |
 
 All services attach to the `proxy-net` bridge network; the proxy reaches each
 backend by its Compose service name (`http://java-backend:8080` and so on).
@@ -91,10 +99,10 @@ curl http://localhost:8080/java/messages       # proxied to the Spring Boot back
 curl -k https://localhost:8443/java/messages   # same route over TLS
 ```
 
-To run every backend, list all nine profiles:
+To run every backend, list all ten profiles:
 
 ```sh
-docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover --profile sticky --profile busy --profile stickyfailover up -d --build
+docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover --profile sticky --profile busy --profile stickyfailover --profile mixed up -d --build
 ```
 
 Teardown — pass the same `--profile` flags you used to start:
@@ -119,6 +127,7 @@ docker compose --profile java down
 | `GET /busy/messages[?delay=ms]` | `balancer://busy` | `busy` | JSON; while a `?delay=` request is in flight, every fast request lands on the *other* member |
 | `GET /stickyfailover/messages` | `balancer://stickyfailover` | `stickyfailover` | JSON; a pinned session moves to `-standby` while the primary is down and **stays there** after recovery |
 | `GET /stickyfailover-strict/messages` | `balancer://stickyfailover-strict` | `stickyfailover` | JSON while healthy; **503** for a pinned client while its member is down |
+| `GET /mixed/messages` | `balancer://mixed` | `mixed` | JSON; `backend` alternates `node`/`python` per request, `host` alternating with it |
 | `GET /balancer-manager` | reverse-proxy | —             | `mod_proxy_balancer` dashboard              |
 | `GET /server-status` | reverse-proxy | —             | Apache `mod_status` page                    |
 | any other path      | reverse-proxy  | —             | 404                                         |
@@ -381,6 +390,33 @@ docker compose --profile stickyfailover down
 The two recovery landings are the point of the demo and are deterministic —
 the cookie's route decides, not scheduling.
 
+## Mixed-stack balancer demo
+
+The `mixed` profile proves the balancer only speaks HTTP: it puts the node
+backend and the python backend behind one `balancer://mixed`
+(`reverse-proxy/apacheconf/sites/29-mixed.conf`, plain `byrequests`
+round-robin — the same method as the `balanced` demo, but the members are
+different stacks). Every request alternates stacks; watch the `backend` and
+`host` fields flip together:
+
+```sh
+docker compose --profile mixed up -d --build
+
+for i in 1 2 3 4; do
+  curl -s http://localhost:8080/mixed/messages | grep -o '"backend":"[^"]*"'
+done
+# "backend":"node", "backend":"python", node, python ...
+
+curl -sk https://localhost:8443/mixed/messages   # same route over TLS
+docker compose --profile mixed down
+```
+
+Neither backend was changed for this — python's `/messages` already returns
+the same JSON shape as node's, with `host` echoing the container hostname
+(`socket.gethostname()` where node uses `os.hostname()`). The balancer never
+learns the stacks; it forwards HTTP and alternates members.
+`/balancer-manager` lists both members of `balancer://mixed`.
+
 ## Tests
 
 `scripts/smoke.sh` is the test suite. It builds the stack, starts the
@@ -389,7 +425,7 @@ each route, then tears the stack down again. All checks run even if an earlier
 one failed, and any failure exits non-zero:
 
 ```sh
-scripts/smoke.sh               # all nine profiles — 55 checks
+scripts/smoke.sh               # all ten profiles — 59 checks
 scripts/smoke.sh java node     # any subset
 ```
 
@@ -399,8 +435,9 @@ is missing, so it is also the one-command verification of a fresh clone.
 CI (`.github/workflows/ci.yml`) runs a single job on every push to `master`
 and on pull requests: set up buildx, generate the certificate, build five
 distinct images — the `balanced` replicas, the `failover` pair, the
-`sticky` pair, the `busy` pair and the `stickyfailover` pair are eleven
-services sharing the single node image — with GitHub Actions layer caching
+`sticky` pair, the `busy` pair, the `stickyfailover` pair and the `mixed`
+node member are twelve services sharing the single node image — with
+GitHub Actions layer caching
 (merged from `.github/compose.cache.yml`), then run `scripts/smoke.sh`.
 
 The Java backend additionally has `@WebMvcTest` unit tests

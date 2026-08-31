@@ -24,6 +24,7 @@
     <li><code>GET /sticky/messages</code> — session affinity: one member per client cookie, round-robin without (<code>--profile sticky</code>)</li>
     <li><code>GET /busy/messages?delay=ms</code> — bybusyness: the member with fewest active requests answers; a long request is skipped around (<code>--profile busy</code>)</li>
     <li><code>GET /stickyfailover/messages</code> and <code>GET /stickyfailover-strict/messages</code> — sticky hot standby: a pinned session fails over to the standby and stays there; the strict route (<code>nofailover=On</code>) breaks with 503 instead (<code>--profile stickyfailover</code>)</li>
+    <li><code>GET /mixed/messages</code> — mixed-stack round-robin: one node and one python member alternate per request (<code>--profile mixed</code>)</li>
     <li><code>GET /balancer-manager</code> — balancer dashboard (private ranges only, <code>--profile balanced</code>)</li>
   </ul>
   <p>Also served: this page over HTTPS at <code>https://localhost:8443/</code>
