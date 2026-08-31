@@ -8,17 +8,7 @@ value, not commitment.
 
 ## Open items
 
-### 1. More balancer members
-
-Grow `balancer://demo` beyond three members (or the failover pair beyond
-two). Per the conventions in CLAUDE.md this means new named services plus
-`BalancerMember` lines — never `docker compose scale` — so the work is
-mostly Compose plumbing plus smoke-check updates.
-
-Source: `docs/superpowers/specs/2026-08-27-failover-demo-design.md`
-(out of scope).
-
-### 2. Swarm integration
+### 1. Swarm integration
 
 Running the demo under Docker Swarm (multiple hosts, `docker stack deploy`)
 instead of single-host Compose. Largest scope item here; would change the
@@ -41,6 +31,12 @@ Not backlog — decided against, recorded so they are not re-litigated:
 
 Deferred items that were later implemented — kept for context:
 
+- **More balancer members** — deferred 2026-08-27 in the failover design,
+  shipped 2026-08-31: `balancer://demo` grew to five members
+  (`node-backend-4/5`, `24-balanced.conf`) and `balancer://failover` to
+  two actives plus a shared hot standby (`node-backend-secondary`,
+  `25-failover.conf`). See
+  `docs/superpowers/specs/2026-08-31-more-balancer-members-design.md`.
 - **`bybusyness` contrast** — deferred 2026-08-25 in the balancer design,
   shipped 2026-08-29 as the `busy` profile (`27-busy.conf`,
   `node-backend-busy-1/2`, `?delay=` in the node backend).

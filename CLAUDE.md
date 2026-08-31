@@ -17,8 +17,8 @@ the proxy by URL prefix:
 | `/nginx/` | nginx-backend   | `nginx`  | static nginx                 |
 | `/node/`  | node-backend    | `node`   | zero-dependency `node:http`  |
 | `/python/`| python-backend  | `python` | stdlib `http.server`         |
-| `/balanced/` | `balancer://demo` → node-backend-1/2/3 | `balanced` | 3× node replicas behind `mod_proxy_balancer` |
-| `/failover/` | `balancer://failover` → node-backend-primary/standby | `failover` | 2× node: hot standby (`status=+H`) |
+| `/balanced/` | `balancer://demo` → node-backend-1…5 | `balanced` | 5× node replicas behind `mod_proxy_balancer` |
+| `/failover/` | `balancer://failover` → node-backend-primary/secondary + standby | `failover` | 3× node: 2 actives + shared hot standby (`status=+H`) |
 | `/sticky/` | `balancer://sticky` → node-backend-sticky-1/2 | `sticky` | 2× node: session affinity (`stickysession`) |
 | `/busy/` | `balancer://busy` → node-backend-busy-1/2 | `busy` | 2× node: `lbmethod=bybusyness` |
 | `/stickyfailover/`, `/stickyfailover-strict/` | `balancer://stickyfailover(-strict)` → node-backend-sf-primary/standby | `stickyfailover` | 2× node: sticky + hot standby (`nofailover` contrast) |
@@ -39,13 +39,13 @@ scripts/gen-dev-certs.sh
 docker compose --profile java up -d --build
 docker compose --profile java --profile nginx --profile node --profile python --profile balanced --profile failover --profile sticky --profile busy --profile stickyfailover --profile mixed up -d --build
 docker compose --profile balanced up -d --build
-docker compose --profile failover up -d --build   # hot-standby failover demo
+docker compose --profile failover up -d --build   # shared-standby failover demo
 docker compose --profile sticky up -d --build    # session-affinity (sticky) demo
 docker compose --profile busy up -d --build       # bybusyness demo
 docker compose --profile stickyfailover up -d --build  # sticky + hot-standby combo demo
 docker compose --profile mixed up -d --build        # mixed-stack balancer demo
 
-# Test suite — all profiles (59 checks) or any subset
+# Test suite — all profiles (61 checks) or any subset
 scripts/smoke.sh
 scripts/smoke.sh java node
 
@@ -60,9 +60,9 @@ docker compose --profile balanced down
 
 ## Structure
 
-- `docker-compose.yml` — all eighteen services (proxy, four single backends,
-  three `balanced` replicas, the `failover` primary/standby pair, the
-  `sticky` pair, the `busy` pair, the `stickyfailover` pair, the `mixed`
+- `docker-compose.yml` — all twenty-one services (proxy, four single backends,
+  five `balanced` replicas, the `failover` primary/secondary/standby triple,
+  the `sticky` pair, the `busy` pair, the `stickyfailover` pair, the `mixed`
   node+python pair), the `proxy-net` network, published ports, and the single
   source of truth for healthchecks (busybox `wget`).
 - `reverse-proxy/Dockerfile` — patch-pinned base image; bakes in `httpd.conf`,
@@ -73,9 +73,10 @@ docker compose --profile balanced down
   `00-server-status.conf` (loopback + RFC 1918), `10-proxy.conf`
   (`ProxyRequests Off`, `X-Forwarded-Proto`/`Port`), `20`–`23` one file per
   backend route, `24-balanced.conf` (`balancer://demo` round-robin over
-  node-backend-1/2/3 plus the `/balancer-manager` dashboard),
-  `25-failover.conf` (`balancer://failover` hot standby:
-  `node-backend-primary` + `node-backend-standby` with `status=+H`),
+  node-backend-1…5 plus the `/balancer-manager` dashboard),
+  `25-failover.conf` (`balancer://failover` shared hot standby: actives
+  `node-backend-primary` + `node-backend-secondary`, spare
+  `node-backend-standby` with `status=+H`),
   `26-sticky.conf` (`balancer://sticky` session affinity:
   `node-backend-sticky-1/2` with `route=` + `stickysession=SESSIONID` +
   `scolonpathdelim=On` for `;SESSIONID=` URL embedding),
@@ -147,16 +148,17 @@ docker compose --profile balanced down
   into one worker — scaled replicas behind one service name share a single
   `BalancerMember` URL, so the balancer sees one member. Even if expanded,
   Docker's DNS round-robin behind one name defeats `byrequests` accounting.
-  That is why the demo has three explicit services (`node-backend-1/2/3`)
+  That is why the demo has five explicit services (`node-backend-1…5`)
   in `24-balanced.conf` — grow the balancer by adding a service plus a
   `BalancerMember` line, never by scaling.
 - **Hot standby needs `status=+H`, `hostname:`, and a real error window.**
-  Mark the spare `status=+H` so it serves only when the primary is in error
-  state, give both services explicit `hostname:` keys (the JSON `host` field
-  is the container hostname — a missing key shows the container ID), and keep
-  the primary's retry small but nonzero (`retry=5`) — the error window is
-  what activates the standby (`retry=0` wipes it; the standby never engages)
-  and it expires fast enough that recovery feels instant.
+  Mark the spare `status=+H` so it serves only when every active is in error
+  state, give every member service an explicit `hostname:` key (the JSON
+  `host` field is the container hostname — a missing key shows the container
+  ID), and keep each active's retry small but nonzero (`retry=5`) — the
+  error window is what lets the standby engage (`retry=0` wipes it; the
+  standby never activates) and it expires fast enough that recovery feels
+  instant.
 - **Sticky routes need the route string in four places.** The member's
   `route=` param, the service's `ROUTE` env var (the node app bakes it
   into the `SESSIONID` cookie suffix, jvmRoute-style), the service name,

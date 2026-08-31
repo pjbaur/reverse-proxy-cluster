@@ -6,10 +6,10 @@ with published ports — `8080` (plain HTTP) and `8443` (TLS with a self-signed
 dev certificate). Each backend sits behind a Compose profile, so you start
 exactly the backends you want and reach all of them through the same proxy by
 URL prefix (`/java/`, `/nginx/`, `/node/`, `/python/`). A fifth profile,
-`balanced`, puts three replicas of the node backend behind Apache's own load
+`balanced`, puts five replicas of the node backend behind Apache's own load
 balancer at `/balanced/` — see [Load-balancing demo](#load-balancing-demo).
-A sixth profile, `failover`, pairs an active primary with a hot standby at
-`/failover/` — see [Failover demo](#failover-demo).
+A sixth profile, `failover`, runs two active members with one shared hot
+standby at `/failover/` — see [Failover demo](#failover-demo).
 A seventh profile, `sticky`, pins each client to one member via a session
 cookie or a URL-embedded session id at `/sticky/` — see
 [Sticky sessions demo](#sticky-sessions-demo).
@@ -38,11 +38,14 @@ client ──▶ :8443 (https) ─┘   │  TLS terminated here, self-signed de
                               │                 byrequests round-robin:
                               │                 ├─▶ node-backend-1 :8080
                               │                 ├─▶ node-backend-2 :8080
-                              │                 └─▶ node-backend-3 :8080
+                              │                 ├─▶ node-backend-3 :8080
+                              │                 ├─▶ node-backend-4 :8080
+                              │                 └─▶ node-backend-5 :8080
                               ├─▶ /failover/ ─▶ balancer://failover (profile failover)
                               │                 hot standby (status=+H):
-                              │                 ├─▶ node-backend-primary :8080  ◀─ serves all
-                              │                 └─▶ node-backend-standby :8080  ◀─ on error only
+                              │                 ├─▶ node-backend-primary   :8080  ◀─ actives share
+                              │                 ├─▶ node-backend-secondary :8080  ◀─ the traffic
+                              │                 └─▶ node-backend-standby   :8080  ◀─ on error only
                               ├─▶ /sticky/  ─▶ balancer://sticky  (profile sticky)
                               │                 session affinity (stickysession=SESSIONID):
                               │                 ├─▶ node-backend-sticky-1 :8080  ◀─ cookie suffix .node-backend-sticky-1
@@ -71,8 +74,8 @@ client ──▶ :8443 (https) ─┘   │  TLS terminated here, self-signed de
 | nginx-backend   | `nginx:1.30-alpine`                       | `nginx`  | none            | `/nginx/`   |
 | node-backend    | `node:22-alpine`                          | `node`   | none            | `/node/`    |
 | python-backend  | `python:3.12-alpine`                      | `python` | none            | `/python/`  |
-| node-backend-1 … 3 | `node:22-alpine` (same build as `node-backend`) | `balanced` | none      | `/balanced/` (via `balancer://demo`) |
-| node-backend-primary, node-backend-standby | `node:22-alpine` (same build as `node-backend`) | `failover` | none | `/failover/` (via `balancer://failover`) |
+| node-backend-1 … 5 | `node:22-alpine` (same build as `node-backend`) | `balanced` | none      | `/balanced/` (via `balancer://demo`) |
+| node-backend-primary, node-backend-secondary, node-backend-standby | `node:22-alpine` (same build as `node-backend`) | `failover` | none | `/failover/` (via `balancer://failover`) |
 | node-backend-sticky-1, node-backend-sticky-2 | `node:22-alpine` (same build as `node-backend`) | `sticky` | none | `/sticky/` (via `balancer://sticky`) |
 | node-backend-busy-1, node-backend-busy-2 | `node:22-alpine` (same build as `node-backend`) | `busy` | none | `/busy/` (via `balancer://busy`) |
 | node-backend-sf-primary, node-backend-sf-standby | `node:22-alpine` (same build as `node-backend`) | `stickyfailover` | none | `/stickyfailover/` and `/stickyfailover-strict/` (via `balancer://stickyfailover(-strict)`) |
@@ -122,7 +125,7 @@ docker compose --profile java down
 | `GET /node/messages`| node-backend   | `node`        | JSON; echoes `X-Forwarded-*` headers        |
 | `GET /python/messages` | python-backend | `python`   | JSON; echoes `X-Forwarded-*` headers        |
 | `GET /balanced/messages` | `balancer://demo` | `balanced` | JSON; `host` names the replica that answered |
-| `GET /failover/messages` | `balancer://failover` | `failover` | JSON; `host` is `node-backend-primary`, or `-standby` while it is down |
+| `GET /failover/messages` | `balancer://failover` | `failover` | JSON; `host` alternates the two actives, and is `-standby` only while both are down |
 | `GET /sticky/messages` | `balancer://sticky` | `sticky` | JSON; `host` is constant per client cookie, alternating without one; `?SESSIONID=<id>.<route>` or `;SESSIONID=...` in the URL pins without a cookie and overrides the cookie |
 | `GET /busy/messages[?delay=ms]` | `balancer://busy` | `busy` | JSON; while a `?delay=` request is in flight, every fast request lands on the *other* member |
 | `GET /stickyfailover/messages` | `balancer://stickyfailover` | `stickyfailover` | JSON; a pinned session moves to `-standby` while the primary is down and **stays there** after recovery |
@@ -151,20 +154,20 @@ serves a static file and cannot echo request headers.
 
 ## Load-balancing demo
 
-The `balanced` profile adds a load-balancing tier: three replicas of the node
-backend (`node-backend-1` … `node-backend-3`) behind Apache's own
+The `balanced` profile adds a load-balancing tier: five replicas of the node
+backend (`node-backend-1` … `node-backend-5`) behind Apache's own
 `mod_proxy_balancer`, defined in
 `reverse-proxy/apacheconf/sites/24-balanced.conf`:
 
 ```sh
-# 1. Start the proxy plus the three replicas
+# 1. Start the proxy plus the five replicas
 docker compose --profile balanced up -d --build
 
 # 2. Ask repeatedly — the "host" field names the replica that answered
 for i in 1 2 3 4 5 6; do
   curl -s http://localhost:8080/balanced/messages | grep -o '"host":"[^"]*"'
 done
-# "host":"node-backend-1" / "node-backend-2" / "node-backend-3" — one
+# "host":"node-backend-1" / "-2" / "-3" / "-4" / "-5" — one
 # replica per request (byrequests round-robin)
 
 # 3. Same route over TLS — the *:443 vhost inherits the balancer
@@ -174,7 +177,7 @@ curl -k https://localhost:8443/balanced/messages
 docker compose --profile balanced down
 ```
 
-`host` is the serving container's hostname — `node-backend-1`, `-2` or `-3`.
+`host` is the serving container's hostname — `node-backend-1` … `-5`.
 Each replica service sets `hostname:` in `docker-compose.yml` so the JSON
 names the member directly; without it, Docker's generated container ID (an
 opaque hex string) would appear instead.
@@ -192,47 +195,56 @@ a scripted `curl` must add `-H "Referer: http://localhost:8080/…"`.
 
 ## Failover demo
 
-The `failover` profile adds a hot-standby pair: the node backend twice
-(`node-backend-primary` + `node-backend-standby`) behind
-`balancer://failover` in `reverse-proxy/apacheconf/sites/25-failover.conf`.
-The primary serves everything; the standby — marked `status=+H` — only
-answers while the primary is in error state. The primary carries
-`retry=5`, not the project's usual `retry=0`: hot standby engages through
-the worker error state, which `retry=0` would wipe instantly (every
-request would re-elect the dead primary and 503). The bounded 5 s window
-activates the standby the moment the primary fails and re-elects the
-primary within 5 s of it returning:
+The `failover` profile adds a shared hot standby: the node backend three
+times (`node-backend-primary` + `node-backend-secondary` as the actives,
+`node-backend-standby` as the spare) behind `balancer://failover` in
+`reverse-proxy/apacheconf/sites/25-failover.conf`. The two actives share
+traffic round-robin while healthy; with one active down, the survivor
+serves everything; the standby — marked `status=+H` — only answers while
+BOTH actives are in error state. One spare covers the whole active pool
+instead of one spare per primary. Both actives carry `retry=5`, not the
+project's usual `retry=0`: hot standby engages through the worker error
+state, which `retry=0` would wipe instantly (every request would re-elect
+a dead active and 503). The bounded 5 s window activates the standby the
+moment both actives fail and re-elects them within 5 s of either
+returning:
 
 ```sh
 docker compose --profile failover up -d --build
 
-# every request answers from the primary
-curl -s http://localhost:8080/failover/messages | grep -o '"host":"[^"]*"'
+# the two actives alternate
+for i in 1 2 3 4; do
+  curl -s http://localhost:8080/failover/messages | grep -o '"host":"[^"]*"'
+done
 
-# kill the primary — from the second request on, the standby answers
+# kill one active — the survivor serves everything, standby still idle
 docker compose --profile failover stop node-backend-primary
 curl -s http://localhost:8080/failover/messages | grep -o '"host":"[^"]*"'
 
-# restart the primary — traffic returns on the next request
-docker compose --profile failover up -d --wait node-backend-primary
+# kill the second active too — from the second request on, the standby answers
+docker compose --profile failover stop node-backend-secondary
+curl -s http://localhost:8080/failover/messages | grep -o '"host":"[^"]*"'
+
+# restart both actives — the round-robin resumes on the next request
+docker compose --profile failover up -d --wait node-backend-primary node-backend-secondary
 curl -s http://localhost:8080/failover/messages | grep -o '"host":"[^"]*"'
 
 curl -k https://localhost:8443/failover/messages   # same route over TLS
 docker compose --profile failover down
 ```
 
-The first request after the stop is the transition itself and is
+The first request after each stop is the transition itself and is
 nondeterministic: Compose removes the stopped container's DNS entry, so
 the balancer either answers 500 (DNS lookup failure, no in-request
 deferral) or blocks on the dead address for up to Apache's 60 s `Timeout`
-before retrying on the standby. Either outcome puts the primary worker
-into error state, and every request from the second onward is served by
-the standby; the smoke suite warms the transition request through before
-asserting the steady state.
+before retrying elsewhere. Either outcome puts the dead worker into error
+state, and every request from the second onward is served by the survivor
+(or, once both actives are down, the standby); the smoke suite warms each
+transition request through before asserting the steady state.
 
 `/balancer-manager` lists both balancers; the standby's status column reads
 `Stby` (the `status=+H` flag, shown only on the standby) and its `Elected`
-count stays `0` until the failover.
+count stays `0` until both actives fail.
 
 ## Sticky sessions demo
 
@@ -425,7 +437,7 @@ each route, then tears the stack down again. All checks run even if an earlier
 one failed, and any failure exits non-zero:
 
 ```sh
-scripts/smoke.sh               # all ten profiles — 59 checks
+scripts/smoke.sh               # all ten profiles — 61 checks
 scripts/smoke.sh java node     # any subset
 ```
 
@@ -434,9 +446,9 @@ is missing, so it is also the one-command verification of a fresh clone.
 
 CI (`.github/workflows/ci.yml`) runs a single job on every push to `master`
 and on pull requests: set up buildx, generate the certificate, build five
-distinct images — the `balanced` replicas, the `failover` pair, the
+distinct images — the `balanced` replicas, the `failover` triple, the
 `sticky` pair, the `busy` pair, the `stickyfailover` pair and the `mixed`
-node member are twelve services sharing the single node image — with
+node member are fifteen services sharing the single node image — with
 GitHub Actions layer caching
 (merged from `.github/compose.cache.yml`), then run `scripts/smoke.sh`.
 
@@ -459,16 +471,17 @@ The Java backend additionally has `@WebMvcTest` unit tests
     pair per backend, each with `retry=0` so a failed connect is retried on
     the next request instead of poisoning the worker for 60 s.
   - `24-balanced.conf` — the load balancer: `<Proxy "balancer://demo">` with
-    three `BalancerMember` lines (`lbmethod=byrequests` round-robin), the
+    five `BalancerMember` lines (`lbmethod=byrequests` round-robin), the
     `/balanced/` `ProxyPass`/`ProxyPassReverse` pair, and the
     `/balancer-manager` dashboard. `retry=0` lives on the `BalancerMember`
     lines, not on the balancer `ProxyPass` — with a `balancer://` target,
     key=value parameters are balancer parameters and httpd rejects worker
     parameters there.
-  - `25-failover.conf` — the hot-standby pair: `<Proxy "balancer://failover">`
-    with `node-backend-primary` (`retry=5`) and `node-backend-standby`
+  - `25-failover.conf` — the shared hot standby: `<Proxy
+    "balancer://failover">` with `node-backend-primary` and
+    `node-backend-secondary` (both `retry=5`) plus `node-backend-standby`
     (`retry=0 status=+H`) and the `/failover/` `ProxyPass`/`ProxyPassReverse`
-    pair. The primary's `retry=5` is deliberate: hot standby engages through
+    pair. The actives' `retry=5` is deliberate: hot standby engages through
     the worker error state, which `retry=0` would wipe (standby never
     activates). Same worker-parameters rule as 24: worker parameters live on
     the `BalancerMember` lines, not the balancer `ProxyPass`.
@@ -513,8 +526,8 @@ The Java backend additionally has `@WebMvcTest` unit tests
   (`nginx:1.30-alpine`, `node:22-alpine`, `python:3.12-alpine`, Temurin 21).
 - Healthchecks are defined once in `docker-compose.yml` using the `wget`
   built into every Alpine image (busybox). `nginx-backend`, `python-backend`,
-  and the three balanced replicas (`node-backend-1/2/3`), the failover
-  pair (`node-backend-primary`/`node-backend-standby`), the sticky
+  and the five balanced replicas (`node-backend-1` … `-5`), the failover
+  triple (`node-backend-primary`/`-secondary`/`-standby`), the sticky
   pair (`node-backend-sticky-1`/`-2`), the busy pair
   (`node-backend-busy-1`/`-2`) and the stickyfailover pair
   (`node-backend-sf-primary`/`-standby`) probe `http://127.0.0.1/...`
