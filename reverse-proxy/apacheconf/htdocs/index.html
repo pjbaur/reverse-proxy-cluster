@@ -19,8 +19,8 @@
     <li><code>GET /nginx/</code> and <code>GET /nginx/messages</code> — static nginx (<code>--profile nginx</code>)</li>
     <li><code>GET /node/messages</code> — Node.js (<code>--profile node</code>)</li>
     <li><code>GET /python/messages</code> — Python (<code>--profile python</code>)</li>
-    <li><code>GET /balanced/messages</code> — load-balanced across 3 node replicas (<code>--profile balanced</code>)</li>
-    <li><code>GET /failover/messages</code> — hot standby: primary serves, standby takes over when it stops (<code>--profile failover</code>)</li>
+    <li><code>GET /balanced/messages</code> — load-balanced across 5 node replicas (<code>--profile balanced</code>)</li>
+    <li><code>GET /failover/messages</code> — shared hot standby: two actives share traffic, the standby takes over when both stop (<code>--profile failover</code>)</li>
     <li><code>GET /sticky/messages</code> — session affinity: one member per client cookie, round-robin without (<code>--profile sticky</code>)</li>
     <li><code>GET /busy/messages?delay=ms</code> — bybusyness: the member with fewest active requests answers; a long request is skipped around (<code>--profile busy</code>)</li>
     <li><code>GET /stickyfailover/messages</code> and <code>GET /stickyfailover-strict/messages</code> — sticky hot standby: a pinned session fails over to the standby and stays there; the strict route (<code>nofailover=On</code>) breaks with 503 instead (<code>--profile stickyfailover</code>)</li>

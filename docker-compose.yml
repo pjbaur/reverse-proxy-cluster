@@ -111,9 +111,51 @@ services:
       retries: 3
       start_period: 5s
 
+  node-backend-4:
+    build: ./backends/node
+    hostname: node-backend-4
+    profiles: ["balanced"]
+    restart: unless-stopped
+    networks:
+      - proxy-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/messages"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  node-backend-5:
+    build: ./backends/node
+    hostname: node-backend-5
+    profiles: ["balanced"]
+    restart: unless-stopped
+    networks:
+      - proxy-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/messages"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
   node-backend-primary:
     build: ./backends/node
     hostname: node-backend-primary
+    profiles: ["failover"]
+    restart: unless-stopped
+    networks:
+      - proxy-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/messages"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  node-backend-secondary:
+    build: ./backends/node
+    hostname: node-backend-secondary
     profiles: ["failover"]
     restart: unless-stopped
     networks:
