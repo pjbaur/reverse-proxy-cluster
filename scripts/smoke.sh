@@ -82,7 +82,7 @@ check_both_backends() {
   i=0
   while [ "$i" -lt 12 ]; do
     b="$(curl -fsS "$url" 2>/dev/null)" || b=""
-    bodies="$bodies$b"
+    bodies="$bodies $b"
     i=$((i + 1))
   done
   if printf '%s' "$bodies" | grep -qF "\"backend\":\"$want_a\"" && \
