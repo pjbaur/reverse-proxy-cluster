@@ -115,6 +115,34 @@ check_host_exact() {
   fi
 }
 
+# check_hosts_only <name> <url> <host...> — fetches 12 times; every
+# response's "host" must be one of the listed hosts and no response may
+# fail. Where check_rotates asserts spread, this asserts membership: a
+# status=+H standby must never answer while an active member is healthy.
+check_hosts_only() {
+  name="$1"; url="$2"; shift 2
+  bad=""; empty=0
+  i=0
+  while [ "$i" -lt 12 ]; do
+    h="$(curl -fsS "$url" 2>/dev/null | sed -n 's/.*"host":"\([^"]*\)".*/\1/p')" || h=""
+    if [ -z "$h" ]; then
+      empty=$((empty + 1))
+    else
+      ok_host=0
+      for want in "$@"; do
+        [ "$h" = "$want" ] && ok_host=1
+      done
+      [ "$ok_host" -eq 0 ] && bad="$bad $h"
+    fi
+    i=$((i + 1))
+  done
+  if [ -z "$bad" ] && [ "$empty" -eq 0 ]; then
+    ok "$name"
+  else
+    failed "$name - unexpected hosts '$bad', $empty failed responses (wanted only:$*) from $url"
+  fi
+}
+
 # check_host_constant <name> <url> <jar> — fetches 6 times through a curl
 # cookie jar; every response's "host" must be the same value (stickiness
 # pins a client to one member; which member is not deterministic under
@@ -268,33 +296,45 @@ for profile in $PROFILES; do
       check "balanced: /balanced/messages"                "$BASE_HTTP/balanced/messages"   '"backend":"node"'
       check "balanced: X-Forwarded-Proto=http"            "$BASE_HTTP/balanced/messages"   '"x_forwarded_proto":"http"'
       check "balanced: /balanced/messages over https"     "$BASE_HTTPS/balanced/messages"  '"backend":"node"' -k
-      check_rotates "balanced: host rotation (>=2 of 3)"  "$BASE_HTTP/balanced/messages"   2
+      check_rotates "balanced: host rotation (all 5)"     "$BASE_HTTP/balanced/messages"   5
       check "balanced: balancer-manager dashboard"        "$BASE_HTTP/balancer-manager"    "Load Balancer Manager"
       ;;
     failover)
       check "failover: /failover/messages"            "$BASE_HTTP/failover/messages"   '"backend":"node"'
       check "failover: /failover/messages over https" "$BASE_HTTPS/failover/messages"  '"backend":"node"' -k
-      check_host_exact "failover: primary serves all"  "$BASE_HTTP/failover/messages"  node-backend-primary
+      check_rotates    "failover: actives share traffic"          "$BASE_HTTP/failover/messages" 2
+      check_hosts_only "failover: standby idle while actives up"  "$BASE_HTTP/failover/messages" \
+        node-backend-primary node-backend-secondary
       # shellcheck disable=SC2086
       if docker compose $PROFILE_ARGS stop node-backend-primary >/dev/null 2>&1; then
-        # The first request after the stop is the transition itself and is
+        # The first request after a stop is the transition itself and is
         # nondeterministic: compose removes the stopped container's DNS
         # entry, so the balancer either eats a DNS lookup failure (AH00898,
         # 500 to the client, no in-request deferral) or blocks on the dead
-        # address until the ~60 s Timeout before retrying on the standby.
-        # Either outcome puts the primary worker into error state; the
-        # standby defers reliably from the *second* request. Warm the
-        # transition through, then assert the steady state.
+        # address until the ~60 s Timeout. Either outcome puts the dead
+        # worker into error state; the survivor (an active, or the standby
+        # once both actives are down) defers reliably from the *second
+        # request. Warm each transition through, then assert steady state.
         curl -fsS --max-time 70 "$BASE_HTTP/failover/messages" >/dev/null 2>&1 || true
-        check_host_exact "failover: standby takes over" "$BASE_HTTP/failover/messages" node-backend-standby
-        # --wait outlasts the primary's 5 s retry window (the healthcheck
-        # interval alone is 10 s), so the primary is re-elected right away.
-        # Keep it that way if the healthcheck interval is ever lowered.
+        check_host_exact "failover: one active down, other serves" \
+          "$BASE_HTTP/failover/messages" node-backend-secondary
         # shellcheck disable=SC2086
-        if docker compose $PROFILE_ARGS up -d --wait --wait-timeout 60 node-backend-primary >/dev/null 2>&1; then
-          check_host_exact "failover: primary recovers" "$BASE_HTTP/failover/messages" node-backend-primary
+        if docker compose $PROFILE_ARGS stop node-backend-secondary >/dev/null 2>&1; then
+          curl -fsS --max-time 70 "$BASE_HTTP/failover/messages" >/dev/null 2>&1 || true
+          check_host_exact "failover: both actives down, standby takes over" \
+            "$BASE_HTTP/failover/messages" node-backend-standby
+          # --wait outlasts the actives' 5 s retry window (the healthcheck
+          # interval alone is 10 s), so both are re-elected right away.
+          # Keep it that way if the healthcheck interval is ever lowered.
+          # shellcheck disable=SC2086
+          if docker compose $PROFILE_ARGS up -d --wait --wait-timeout 60 node-backend-primary node-backend-secondary >/dev/null 2>&1; then
+            check_rotates "failover: actives recover, rotation resumes" \
+              "$BASE_HTTP/failover/messages" 2
+          else
+            failed "failover: actives did not come back healthy after restart"
+          fi
         else
-          failed "failover: primary did not come back healthy after restart"
+          failed "failover: could not stop node-backend-secondary"
         fi
       else
         failed "failover: could not stop node-backend-primary"
