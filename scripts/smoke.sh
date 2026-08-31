@@ -1,7 +1,7 @@
 #!/bin/sh
 # scripts/smoke.sh — the project's test suite.
 #
-# Builds the stack, starts the requested Compose profiles (default: all nine),
+# Builds the stack, starts the requested Compose profiles (default: all ten),
 # waits until every container reports healthy, then exercises every route and
 # tears the stack down again. All checks run even if one fails (so a single
 # failure doesn't hide others); any failure exits non-zero.
@@ -17,7 +17,7 @@ cd "$ROOT"
 if [ "$#" -gt 0 ]; then
   PROFILES="$*"
 else
-  PROFILES="java nginx node python balanced failover sticky busy stickyfailover"
+  PROFILES="java nginx node python balanced failover sticky busy stickyfailover mixed"
 fi
 
 PROFILE_ARGS=""
@@ -69,6 +69,27 @@ check_rotates() {
     ok "$name"
   else
     failed "$name - only $distinct distinct hosts (wanted >= $min) from $url"
+  fi
+}
+
+# check_both_backends <name> <url> <backend-a> <backend-b> — fetches 12
+# times; both backend identifiers must appear across the accumulated bodies
+# (round-robin over two stacks alternates; one missing means the balancer
+# is not actually mixing, or a member is down).
+check_both_backends() {
+  name="$1"; url="$2"; want_a="$3"; want_b="$4"
+  bodies=""
+  i=0
+  while [ "$i" -lt 12 ]; do
+    b="$(curl -fsS "$url" 2>/dev/null)" || b=""
+    bodies="$bodies$b"
+    i=$((i + 1))
+  done
+  if printf '%s' "$bodies" | grep -qF "\"backend\":\"$want_a\"" && \
+     printf '%s' "$bodies" | grep -qF "\"backend\":\"$want_b\""; then
+    ok "$name"
+  else
+    failed "$name - did not see both '$want_a' and '$want_b' backends from $url"
   fi
 }
 
@@ -363,6 +384,12 @@ for profile in $PROFILES; do
       else
         failed "stickyfailover: could not stop node-backend-sf-primary"
       fi
+      ;;
+    mixed)
+      check_both_backends "mixed: both stacks serve" "$BASE_HTTP/mixed/messages" node python
+      check_rotates "mixed: host rotation (>=2)" "$BASE_HTTP/mixed/messages" 2
+      check "mixed: X-Forwarded-Proto=http" "$BASE_HTTP/mixed/messages" '"x_forwarded_proto":"http"'
+      check "mixed: X-Forwarded-Proto=https behind TLS" "$BASE_HTTPS/mixed/messages" '"x_forwarded_proto":"https"' -k
       ;;
     *)
       printf 'unknown profile: %s\n' "$profile" >&2
