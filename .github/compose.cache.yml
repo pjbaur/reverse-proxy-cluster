@@ -81,3 +81,13 @@ services:
       context: ./backends/node
       cache_from: ["type=gha,scope=node-backend"]
       cache_to: ["type=gha,mode=max,scope=node-backend"]
+  node-backend-mixed-1:
+    build:
+      context: ./backends/node
+      cache_from: ["type=gha,scope=node-backend"]
+      cache_to: ["type=gha,mode=max,scope=node-backend"]
+  python-backend-mixed-1:
+    build:
+      context: ./backends/python
+      cache_from: ["type=gha,scope=python-backend"]
+      cache_to: ["type=gha,mode=max,scope=python-backend"]

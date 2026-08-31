@@ -231,6 +231,34 @@ services:
       retries: 3
       start_period: 5s
 
+  node-backend-mixed-1:
+    build: ./backends/node
+    hostname: node-backend-mixed-1
+    profiles: ["mixed"]
+    restart: unless-stopped
+    networks:
+      - proxy-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/messages"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  python-backend-mixed-1:
+    build: ./backends/python
+    hostname: python-backend-mixed-1
+    profiles: ["mixed"]
+    restart: unless-stopped
+    networks:
+      - proxy-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/messages"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
 networks:
   proxy-net:
     driver: bridge
